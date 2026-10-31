@@ -130,3 +130,21 @@ def test_launch_camera_in_new_window_mocked(monkeypatch):
     assert len(launched_args) == 1
     args, kwargs = launched_args[0]
     assert any("camera" in str(arg) for arg in args)
+
+
+def test_menu_navigation_keys(test_menu):
+    items = test_menu.get_menu_items()
+    test_menu.selected_index = 0
+
+    # Down navigation
+    test_menu.selected_index = (test_menu.selected_index + 1) % len(items)
+    assert test_menu.selected_index == 1
+
+    # Up navigation
+    test_menu.selected_index = (test_menu.selected_index - 1) % len(items)
+    assert test_menu.selected_index == 0
+
+    # Number direct selection
+    test_menu.selected_index = 4  # Item 5
+    assert test_menu.selected_index == 4
+

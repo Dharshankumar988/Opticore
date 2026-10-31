@@ -50,6 +50,10 @@ def read_key() -> str:
             return "space"
         elif ch in (b"\x1b", b"q", b"Q"):
             return "quit"
+        elif ch in (b"w", b"W", b"k", b"K"):
+            return "up"
+        elif ch in (b"s", b"S", b"j", b"J"):
+            return "down"
         elif ch == b"\x03":  # Ctrl+C
             raise KeyboardInterrupt
         try:
@@ -67,26 +71,41 @@ def read_key() -> str:
             tty.setraw(fd)
             ch = sys.stdin.read(1)
             if ch == "\x1b":
-                r, _, _ = select.select([sys.stdin], [], [], 0.05)
-                if r:
-                    ch2 = sys.stdin.read(1)
-                    if ch2 == "[":
-                        ch3 = sys.stdin.read(1)
-                        if ch3 == "A":
-                            return "up"
-                        elif ch3 == "B":
-                            return "down"
-                        elif ch3 == "C":
-                            return "right"
-                        elif ch3 == "D":
-                            return "left"
-                return "quit"
+                # Collect remaining escape bytes with generous 200ms timeout for VMs / SSH / Kali
+                seq = ch
+                while True:
+                    r, _, _ = select.select([sys.stdin], [], [], 0.20)
+                    if not r:
+                        break
+                    next_ch = sys.stdin.read(1)
+                    seq += next_ch
+                    if len(seq) >= 2 and (next_ch.isalpha() or next_ch == "~"):
+                        break
+                    if len(seq) >= 8:
+                        break
+
+                # Handle ANSI, SS3 (Application Cursor Mode used in Kali / xfce), and extended codes
+                if seq in ("\x1b[A", "\x1bOA", "\x1b[1;2A", "\x1b[1;5A") or (seq.startswith("\x1b") and seq.endswith("A")):
+                    return "up"
+                elif seq in ("\x1b[B", "\x1bOB", "\x1b[1;2B", "\x1b[1;5B") or (seq.startswith("\x1b") and seq.endswith("B")):
+                    return "down"
+                elif seq in ("\x1b[C", "\x1bOC", "\x1b[1;2C", "\x1b[1;5C") or (seq.startswith("\x1b") and seq.endswith("C")):
+                    return "right"
+                elif seq in ("\x1b[D", "\x1bOD", "\x1b[1;2D", "\x1b[1;5D") or (seq.startswith("\x1b") and seq.endswith("D")):
+                    return "left"
+                elif seq == "\x1b":
+                    return "quit"
+                return "other"
             elif ch in ("\r", "\n"):
                 return "enter"
             elif ch == " ":
                 return "space"
             elif ch in ("q", "Q"):
                 return "quit"
+            elif ch in ("w", "W", "k", "K"):
+                return "up"
+            elif ch in ("s", "S", "j", "J"):
+                return "down"
             elif ch == "\x03":
                 raise KeyboardInterrupt
             return ch.lower()
@@ -418,7 +437,7 @@ class InteractiveMenu:
         console.print(summary_panel)
 
         # Instructions Bar
-        console.print("[dim]Use [bold white]↑/↓[/bold white] to navigate | [bold white]Enter[/bold white] to select | [bold white]Space[/bold white] to toggle | [bold white]q[/bold white] to quit[/dim]\n")
+        console.print("[dim]Use [bold white]↑/↓[/bold white] (or [bold white]W/S[/bold white]) to navigate | [bold white]Enter[/bold white] to select | [bold white]Space[/bold white] to toggle | [bold white]q[/bold white] to quit[/dim]\n")
 
         # Menu Table
         table = Table(box=box.ROUNDED, show_header=False, expand=True, padding=(0, 1))
@@ -468,10 +487,12 @@ class InteractiveMenu:
             except (KeyboardInterrupt, EOFError):
                 break
 
-            if key == "up":
+            if key in ("up", "w", "k"):
                 self.selected_index = (self.selected_index - 1) % len(items)
-            elif key == "down":
+            elif key in ("down", "s", "j"):
                 self.selected_index = (self.selected_index + 1) % len(items)
+            elif key.isdigit() and 1 <= int(key) <= len(items):
+                self.selected_index = int(key) - 1
             elif key in ("space", "enter"):
                 current_item = items[self.selected_index]
                 action = current_item["action"]

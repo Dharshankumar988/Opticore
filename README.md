@@ -12,7 +12,7 @@ Connect over the internet to your running OptiCore vision server (hosted on Kagg
 2. [Prerequisites](#prerequisites)
 3. [Installation](#installation)
    - [Windows 10/11 Installation](#windows-1011-installation)
-   - [Raspberry Pi OS (ARM64) / Debian Linux Installation](#raspberry-pi-os-arm64--debian-linux-installation)
+   - [Linux Installation (Kali Linux / Ubuntu / Debian)](#linux-installation-kali-linux--ubuntu--debian)
 4. [Raspberry Pi — Complete Setup Guide](#raspberry-pi--complete-setup-guide)
    - [System Packages](#1-system-packages)
    - [Camera Setup (USB & Pi Camera)](#2-camera-setup)
@@ -112,29 +112,36 @@ pip install -e .
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-### Raspberry Pi OS (ARM64) / Debian Linux Installation
+### Linux Installation (Kali Linux / Ubuntu / Debian)
 
-Open a terminal on your Raspberry Pi:
+Open your terminal in **Kali Linux**, **Ubuntu**, or **Debian**:
 
 ```bash
-# 1. Update system packages and install speech synthesizer and video packages
-# (Note: on Raspberry Pi OS Bookworm / Debian 12, espeak-ng is the modern standard package)
-sudo apt update && sudo apt install -y git python3-pip python3-venv espeak-ng libespeak-ng1 libgl1 libglib2.0-0
+# 1. Install prerequisites (speech synthesizer, video libraries, and audio packages)
+sudo apt update && sudo apt install -y git python3-pip python3-venv espeak-ng libespeak-ng1 libgl1 libglib2.0-0 v4l-utils alsa-utils
 
 # 2. Clone the repository from GitHub
 git clone https://github.com/Dharshankumar988/Opticore.git
 cd Opticore
 
-# 3. Create and activate a virtual environment
-# (Required by Raspberry Pi OS / PEP 668 externally-managed environment policy)
+# 3. Create and activate a Python virtual environment
+# (Required by Kali Linux / Debian PEP 668 externally-managed environment policy)
 python3 -m venv venv
 source venv/bin/activate
 
-# 4. Install dependencies and CLI package in editable mode
+# 4. Install dependencies and the OptiCore CLI package in editable mode
 pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
+
+# 5. Connect to your running OptiCore server and launch the Command Center
+opticore-cli connect https://your-ngrok-url.ngrok-free.app
+opticore-cli
 ```
+
+> [!TIP]
+> **Menu Navigation in Linux (Kali Linux / Ubuntu):**  
+> In the interactive menu, you can navigate using **`↑` / `↓` Arrow keys**, or **`W` / `S`** (or **`K` / `J`**), or jump directly by typing the number of the item (`1` through `15`). Press **`Space`** to toggle settings and **`Enter`** to select.
 
 ---
 
