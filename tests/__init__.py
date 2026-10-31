@@ -1,0 +1,1 @@
+"""OptiCore CLI test suite."""

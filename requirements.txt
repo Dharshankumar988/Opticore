@@ -1,0 +1,6 @@
+# OptiCore CLI Command Center Dependencies
+# Lightweight, cross-platform requirements for Windows 10/11 & Raspberry Pi OS (ARM64)
+
+requests>=2.28.0
+rich>=13.0.0
+pyttsx3>=2.90
