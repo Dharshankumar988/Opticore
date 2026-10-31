@@ -23,15 +23,15 @@ def test_menu(tmp_path):
 def test_menu_items_structure(test_menu):
     items = test_menu.get_menu_items()
     assert isinstance(items, list)
-    assert len(items) >= 14
+    assert len(items) >= 13
 
     ids = [item["id"] for item in items]
     assert "connect" in ids
     assert "camera_toggle" in ids
-    assert "camera_stream_new" in ids
     assert "camera_source_toggle" in ids
     assert "camera_preview_toggle" in ids
     assert "monitor_new" in ids
+    assert "monitor_here" in ids
     assert "voice_toggle" in ids
     assert "voice_verb" in ids
     assert "status" in ids

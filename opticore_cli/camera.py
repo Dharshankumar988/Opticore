@@ -115,8 +115,9 @@ def detect_cameras(max_probe: int = 4) -> List[Dict[str, str]]:
 class CameraStreamManager:
     """Manages background camera streaming lifecycle with simple ON/OFF toggling."""
 
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, voice_engine: Optional[object] = None):
         self.config_manager = config_manager
+        self.voice_engine = voice_engine
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._started_event = threading.Event()
@@ -272,6 +273,16 @@ class CameraStreamManager:
                                 self._last_error = data.get("message", "Server rejected stream.")
                             break
                         self.latency_ms = data.get("inference_ms", 0.0)
+
+                        # Enqueue alerts directly to voice engine if active
+                        if self.voice_engine and getattr(self.voice_engine, "enabled", False):
+                            from opticore_cli.models import DetectionEvent
+                            for alert_dict in data.get("alerts", []):
+                                try:
+                                    event = DetectionEvent.from_dict(alert_dict)
+                                    self.voice_engine.enqueue_event(event)
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
 
@@ -319,6 +330,7 @@ async def stream_camera(
     quality: int = 65,
     show_window: bool = False,
     stop_event: Optional[threading.Event] = None,
+    voice_engine: Optional[object] = None,
 ) -> int:
     """Capture frames and stream over WebSocket to OptiCore server (foreground CLI mode)."""
     if cv2 is None or websockets is None:
@@ -395,6 +407,16 @@ async def stream_camera(
                 detections = data.get("detections", [])
                 alerts = data.get("alerts", [])
 
+                # Enqueue alerts to voice engine if active
+                if voice_engine and getattr(voice_engine, "enabled", False):
+                    from opticore_cli.models import DetectionEvent
+                    for a_dict in alerts:
+                        try:
+                            ev = DetectionEvent.from_dict(a_dict)
+                            voice_engine.enqueue_event(ev)
+                        except Exception:
+                            pass
+
                 det_summary = ", ".join(f"{d.get('name')} ({d.get('confidence', 0)*100:.0f}%)" for d in detections[:3])
                 if len(detections) > 3:
                     det_summary += f" +{len(detections)-3} more"
@@ -454,6 +476,7 @@ def run_camera_stream_sync(
     target_fps: float = 15.0,
     quality: int = 65,
     show_window: bool = False,
+    voice_engine: Optional[object] = None,
 ) -> int:
     """Synchronous wrapper to run stream_camera inside an asyncio loop."""
     try:
@@ -465,6 +488,7 @@ def run_camera_stream_sync(
                 target_fps=target_fps,
                 quality=quality,
                 show_window=show_window,
+                voice_engine=voice_engine,
             )
         )
     except KeyboardInterrupt:

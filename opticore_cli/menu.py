@@ -312,28 +312,22 @@ class InteractiveMenu:
                 "desc": "Toggle local OpenCV window showing server-annotated detections",
                 "action": "camera_preview_toggle",
             },
-            {
-                "id": "camera_stream_new",
-                "label": "Stream Camera (Dedicated Window)",
-                "tag": "[dim]SEPARATE CONSOLE[/dim]",
-                "desc": "Streams camera in a dedicated popup window",
-                "action": "camera_stream_new",
-            },
-            # --- Detection Alert Monitoring ---
+            # --- Important Safety Alert Logs ---
             {
                 "id": "monitor_new",
-                "label": "Launch Alert Logs (New Window)",
+                "label": "Important Alert Logs (New Window)",
                 "tag": "[bold cyan]LOGS POPUP[/bold cyan]",
-                "desc": "Spawns a dedicated new shell window for streaming live detection alerts",
+                "desc": "Dedicated window showing ONLY important safety alerts (P1 Critical / P2 Warning)",
                 "action": "monitor_new",
             },
             {
                 "id": "monitor_here",
                 "label": "Stream Alert Logs in This Terminal",
                 "tag": "[dim]IN-PLACE[/dim]",
-                "desc": "Runs detection alert stream in this terminal (Ctrl+C to return to menu)",
+                "desc": "Stream important safety alerts here (Ctrl+C to return to menu)",
                 "action": "monitor_here",
             },
+            # --- Voice Controls ---
             {
                 "id": "voice_toggle",
                 "label": f"Voice Alerts: [ {voice_badge} ]",
@@ -345,7 +339,7 @@ class InteractiveMenu:
                 "id": "voice_verb",
                 "label": f"Voice Verbosity: < {verb} >",
                 "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
-                "desc": "Cycle alert verbosity: PRIORITY (P1/P2) -> CRITICAL (P1) -> ALL",
+                "desc": "Cycle alert verbosity: PRIORITY (P1/P2/People) -> CRITICAL (P1) -> ALL",
                 "action": "cycle_verbosity",
             },
             {
@@ -376,13 +370,6 @@ class InteractiveMenu:
                 "tag": "[dim]TABLE[/dim]",
                 "desc": "Display table of recent detection alerts from /events",
                 "action": "events",
-            },
-            {
-                "id": "metrics",
-                "label": "Performance Metrics",
-                "tag": "[dim]COUNTERS[/dim]",
-                "desc": "View processed frames, avg latency, FPS EMA, and rejected frames",
-                "action": "metrics",
             },
             {
                 "id": "config",

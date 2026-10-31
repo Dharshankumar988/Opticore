@@ -18,12 +18,23 @@ class LiveEventMonitor:
         voice_engine: VoiceAlertEngine,
         poll_interval: float = 1.0,
         max_seen_cache: int = 500,
+        important_only: bool = True,
     ):
         self.client = client
         self.voice_engine = voice_engine
         self.poll_interval = max(0.2, poll_interval)
+        self.important_only = important_only
         self.seen_event_keys: deque = deque(maxlen=max_seen_cache)
         self.seen_set: Set[str] = set()
+
+    def is_important(self, event) -> bool:
+        """Filters logs to essential safety alerts (P1/P2/approaching/critical obstacles)."""
+        if not self.important_only:
+            return True
+        if event.priority in {"P1", "P2"} or event.approaching:
+            return True
+        critical_names = {"car", "bus", "truck", "pothole", "person", "motorcycle", "bicycle", "stairs", "obstacle"}
+        return event.name in critical_names and event.priority != "P4"
 
     def run(self, max_events: Optional[int] = None) -> int:
         """Runs the live monitoring loop until interrupted by user (Ctrl+C).
@@ -34,12 +45,12 @@ class LiveEventMonitor:
             console.print("[bold red]Cannot start monitor: Server URL is not configured.[/bold red]")
             return 0
 
-        console.print("\n[bold cyan]--- LIVE PRIORITY ALERT STREAM STARTED ---[/bold cyan]")
+        mode_str = "IMPORTANT ALERTS ONLY" if self.important_only else "ALL EVENTS"
+        console.print(f"\n[bold cyan]--- LIVE DETECTION ALERT STREAM STARTED ({mode_str}) ---[/bold cyan]")
         console.print(f"[dim]Connected to: {self.client.base_url} (Poll interval: {self.poll_interval:.1f}s)[/dim]")
         voice_state = "[bold green]ON[/bold green]" if self.voice_engine.enabled else "[dim]OFF[/dim]"
         console.print(f"[dim]Voice alerts: {voice_state} (Verbosity: {self.voice_engine.verbosity})[/dim]")
-        console.print("[dim]Streaming priority detection alerts from server /events (raw video frames are handled by camera producer).[/dim]")
-        console.print("[dim]Press [bold white]Ctrl+C[/bold white] at any time to return to Command Center.[/dim]\n")
+        console.print("[dim]Streaming priority detection alerts from server /events. Press [bold white]Ctrl+C[/bold white] to exit.[/dim]\n")
 
         # Initial bootstrap: populate seen cache with current events so we don't dump old history on start
         try:
@@ -80,8 +91,10 @@ class LiveEventMonitor:
                             if len(self.seen_set) > len(self.seen_event_keys) * 1.5:
                                 self.seen_set = set(self.seen_event_keys)
 
-                            # Display formatted log line
-                            print_event_log_line(event)
+                            # Filter for important logs
+                            if self.is_important(event):
+                                # Display formatted log line
+                                print_event_log_line(event)
 
                             # Dispatch to voice engine
                             if self.voice_engine.enabled:

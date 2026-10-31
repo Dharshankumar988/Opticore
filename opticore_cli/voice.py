@@ -113,6 +113,13 @@ class VoiceAlertEngine:
 
     def _worker_loop(self) -> None:
         """Sequential speech worker loop to guarantee speech does not overlap."""
+        if platform.system().lower() == "windows":
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
+
         tts_instance = None
         if self._backend == "pyttsx3":
             try:
@@ -174,7 +181,7 @@ class VoiceAlertEngine:
                 tts_instance.runAndWait()
                 return
             except Exception as e:
-                logger.debug("pyttsx3 failed during speech: %s. Falling back.", e)
+                logger.debug("pyttsx3 failed during speech: %s. Falling back to SAPI.", e)
 
         # Fallback 1: PowerShell SAPI (Windows)
         if platform.system().lower() == "windows":
@@ -185,7 +192,7 @@ class VoiceAlertEngine:
                     "powershell",
                     "-NoProfile",
                     "-Command",
-                    f"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = 1; $s.Speak('{escaped}')",
+                    f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{escaped}')",
                 ]
                 subprocess.run(
                     cmd,
@@ -238,15 +245,16 @@ class VoiceAlertEngine:
         if v == "all":
             return True
 
-        critical_classes = {"car", "bus", "truck", "pothole"}
-        is_critical_class = event.name in critical_classes
+        # Matches server CLASS_PRIORITY rankings (P1 / P2)
+        priority_classes = {"car", "bus", "truck", "pothole", "person", "motorcycle", "bicycle"}
+        is_priority_class = event.name in priority_classes
         is_high_priority = event.priority in {"P1", "P2"}
 
         if v == "priority":
-            return is_high_priority or is_critical_class
+            return is_high_priority or is_priority_class
 
         if v == "critical":
-            return event.priority == "P1" or is_critical_class
+            return event.priority == "P1" or event.name in {"car", "bus", "truck", "pothole"}
 
         return False
 

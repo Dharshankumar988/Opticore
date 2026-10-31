@@ -47,7 +47,10 @@ class OptiCoreCLI:
             volume=self.config.voice_volume,
             cooldown=self.config.voice_cooldown,
         )
-        self.camera_manager = CameraStreamManager(config_manager=self.config_manager)
+        self.camera_manager = CameraStreamManager(
+            config_manager=self.config_manager,
+            voice_engine=self.voice,
+        )
         self.running = False
 
     def get_prompt_text(self) -> str:
@@ -283,6 +286,7 @@ class OptiCoreCLI:
                 target_fps=self.config.camera_fps,
                 quality=self.config.camera_quality,
                 show_window=show,
+                voice_engine=self.voice,
             )
 
         else:
