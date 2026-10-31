@@ -49,16 +49,29 @@ class VoiceAlertEngine:
 
     def _init_tts_engine(self) -> None:
         """Initializes the best available TTS backend."""
+        system = platform.system().lower()
+        if system == "windows":
+            try:
+                import win32com.client
+                import pythoncom
+                pythoncom.CoInitialize()
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                del speaker
+                self._backend = "sapi_native"
+                self._engine_available = True
+                return
+            except Exception as e:
+                logger.debug("win32com SAPI init failed: %s", e)
+
+            self._backend = "powershell_sapi"
+            self._engine_available = True
+            return
+
         try:
             import pyttsx3
 
             # Test initialization in a safe block
             test_engine = pyttsx3.init()
-            try:
-                test_engine.setProperty("rate", self.rate)
-                test_engine.setProperty("volume", self.volume)
-            except Exception:
-                pass
             self._backend = "pyttsx3"
             self._engine_available = True
             del test_engine
@@ -66,13 +79,7 @@ class VoiceAlertEngine:
         except Exception as e:
             logger.debug("pyttsx3 unavailable: %s", e)
 
-        # Fallback check: native platform tools
-        system = platform.system().lower()
-        if system == "windows":
-            # PowerShell SAPI fallback is always present on Windows 10/11
-            self._backend = "powershell_sapi"
-            self._engine_available = True
-        elif system == "linux":
+        if system == "linux":
             # Check for espeak-ng or espeak on Raspberry Pi / Linux
             candidate_bin = None
             for b in ["espeak-ng", "espeak"]:
@@ -174,20 +181,23 @@ class VoiceAlertEngine:
         if not clean_message:
             return
 
-        if self._backend == "pyttsx3" and tts_instance is not None:
+        # Windows native SAPI (fastest, supports sequential multi-line speech without hanging)
+        if self._backend == "sapi_native" or platform.system().lower() == "windows":
             try:
-                tts_instance.setProperty("rate", self.rate)
-                tts_instance.setProperty("volume", self.volume)
-                tts_instance.say(clean_message)
-                tts_instance.runAndWait()
+                import win32com.client
+                import pythoncom
+                pythoncom.CoInitialize()
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                sapi_rate = max(-10, min(10, int((self.rate - 180) / 15)))
+                speaker.Rate = sapi_rate
+                speaker.Volume = int(self.volume * 100)
+                speaker.Speak(clean_message)
                 return
             except Exception as e:
-                logger.debug("pyttsx3 failed during speech: %s. Falling back to SAPI.", e)
+                logger.debug("win32com SAPI failed: %s. Falling back to PowerShell.", e)
 
-        # Fallback 1: PowerShell SAPI (Windows)
-        if platform.system().lower() == "windows":
+            # Fallback: PowerShell SAPI
             try:
-                # Escape single quotes for PowerShell string
                 escaped = clean_message.replace("'", "''")
                 cmd = [
                     "powershell",
@@ -205,6 +215,16 @@ class VoiceAlertEngine:
                 return
             except Exception as e:
                 logger.debug("PowerShell SAPI failed: %s", e)
+
+        if self._backend == "pyttsx3" and tts_instance is not None:
+            try:
+                tts_instance.setProperty("rate", self.rate)
+                tts_instance.setProperty("volume", self.volume)
+                tts_instance.say(clean_message)
+                tts_instance.runAndWait()
+                return
+            except Exception as e:
+                logger.debug("pyttsx3 failed during speech: %s.", e)
 
         # Fallback 2: espeak / espeak-ng (Raspberry Pi OS / Linux)
         elif self._backend in {"espeak", "espeak-ng"}:
