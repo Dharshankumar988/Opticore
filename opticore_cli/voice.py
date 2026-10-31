@@ -24,9 +24,9 @@ class VoiceAlertEngine:
         self,
         enabled: bool = False,
         verbosity: str = "priority",  # "all", "priority", "critical"
-        rate: int = 180,
+        rate: int = 195,
         volume: float = 1.0,
-        cooldown: float = 7.0,
+        cooldown: float = 3.0,
     ):
         self.enabled = enabled
         self.verbosity = verbosity.lower()
@@ -35,6 +35,7 @@ class VoiceAlertEngine:
         self.cooldown = cooldown
 
         self._queue: queue.Queue = queue.Queue(maxsize=30)
+        self._spoken_keys: dict = {}
         self._last_spoken_message = ""
         self._last_spoken_time = 0.0
         self._lock = threading.Lock()
@@ -264,15 +265,33 @@ class VoiceAlertEngine:
             return False
 
         message = event.message
+        if not message:
+            return False
+
         now = time.time()
+        # Per-object and position key (matches OptiCore vision server repeat logic)
+        track_str = str(event.track_id) if event.track_id is not None else "any"
+        pos_str = str(event.position or "ahead")
+        dir_str = str(event.approach_direction or ("approaching" if event.approaching else "stationary"))
+        key = f"{track_str}|{event.name.lower()}|{pos_str}|{dir_str}"
+
+        repeat_classes = {"person", "door", "stairs", "pole", "obstacle", "car", "bus", "truck", "pothole", "motorcycle", "bicycle"}
+        if event.approaching or event.priority == "P1":
+            effective_cooldown = 2.0
+        elif event.name.lower() in repeat_classes:
+            effective_cooldown = min(3.0, self.cooldown)
+        else:
+            effective_cooldown = self.cooldown
 
         with self._lock:
-            # Deduplicate repeated messages within cooldown window
-            if (
-                message == self._last_spoken_message
-                and (now - self._last_spoken_time) < self.cooldown
-            ):
+            last_time = self._spoken_keys.get(key, 0.0)
+            if (now - last_time) < effective_cooldown:
                 return False
+
+            self._spoken_keys[key] = now
+            if len(self._spoken_keys) > 200:
+                cutoff = now - 30.0
+                self._spoken_keys = {k: t for k, t in self._spoken_keys.items() if t > cutoff}
 
             self._last_spoken_message = message
             self._last_spoken_time = now

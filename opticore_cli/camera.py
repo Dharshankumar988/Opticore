@@ -277,7 +277,32 @@ class CameraStreamManager:
                         # Enqueue alerts directly to voice engine if active
                         if self.voice_engine and getattr(self.voice_engine, "enabled", False):
                             from opticore_cli.models import DetectionEvent
-                            for alert_dict in data.get("alerts", []):
+                            alerts_to_speak = list(data.get("alerts", []))
+                            if not alerts_to_speak and data.get("detections"):
+                                for d in data.get("detections", []):
+                                    d_name = str(d.get("name", "")).lower()
+                                    if d_name in {"person", "car", "bus", "truck", "motorcycle", "bicycle", "pothole", "stairs", "obstacle"}:
+                                        loc = "on your left" if d.get("position") == "left" else "on your right" if d.get("position") == "right" else "ahead"
+                                        if d.get("approaching"):
+                                            msg = f"A {d_name} appears to be approaching {d.get('approach_direction', 'head-on')}."
+                                        else:
+                                            msg = f"{d_name.capitalize()} detected {loc}."
+                                        synthesized_alert = {
+                                            "timestamp": time.time(),
+                                            "track_id": d.get("id"),
+                                            "name": d_name,
+                                            "confidence": d.get("confidence", 0.0),
+                                            "class_priority": d.get("class_priority", 2 if d_name in {"person", "motorcycle", "bicycle"} else 1),
+                                            "position": d.get("position", "ahead"),
+                                            "approaching": d.get("approaching", False),
+                                            "approach_direction": d.get("approach_direction"),
+                                            "priority": d.get("priority", "P2"),
+                                            "risk_score": d.get("risk_score", 50),
+                                            "message": msg,
+                                        }
+                                        alerts_to_speak.append(synthesized_alert)
+
+                            for alert_dict in alerts_to_speak:
                                 try:
                                     event = DetectionEvent.from_dict(alert_dict)
                                     self.voice_engine.enqueue_event(event)
@@ -410,7 +435,32 @@ async def stream_camera(
                 # Enqueue alerts to voice engine if active
                 if voice_engine and getattr(voice_engine, "enabled", False):
                     from opticore_cli.models import DetectionEvent
-                    for a_dict in alerts:
+                    alerts_to_speak = list(alerts)
+                    if not alerts_to_speak and detections:
+                        for d in detections:
+                            d_name = str(d.get("name", "")).lower()
+                            if d_name in {"person", "car", "bus", "truck", "motorcycle", "bicycle", "pothole", "stairs", "obstacle"}:
+                                loc = "on your left" if d.get("position") == "left" else "on your right" if d.get("position") == "right" else "ahead"
+                                if d.get("approaching"):
+                                    msg = f"A {d_name} appears to be approaching {d.get('approach_direction', 'head-on')}."
+                                else:
+                                    msg = f"{d_name.capitalize()} detected {loc}."
+                                synthesized_alert = {
+                                    "timestamp": time.time(),
+                                    "track_id": d.get("id"),
+                                    "name": d_name,
+                                    "confidence": d.get("confidence", 0.0),
+                                    "class_priority": d.get("class_priority", 2 if d_name in {"person", "motorcycle", "bicycle"} else 1),
+                                    "position": d.get("position", "ahead"),
+                                    "approaching": d.get("approaching", False),
+                                    "approach_direction": d.get("approach_direction"),
+                                    "priority": d.get("priority", "P2"),
+                                    "risk_score": d.get("risk_score", 50),
+                                    "message": msg,
+                                }
+                                alerts_to_speak.append(synthesized_alert)
+
+                    for a_dict in alerts_to_speak:
                         try:
                             ev = DetectionEvent.from_dict(a_dict)
                             voice_engine.enqueue_event(ev)
