@@ -219,6 +219,7 @@ def render_help() -> Panel:
     table.add_row("metrics", "metrics", "View detailed pipeline performance metrics")
     table.add_row("events", "events [--limit N]", "Display the most recent detection alert events (1-100)")
     table.add_row("monitor / logs", "monitor [-w] [--poll S]", "Stream live logs (-w / --new-window opens in dedicated shell)")
+    table.add_row("stream / camera", "stream [-w] [-c CAM] [--show]", "Stream local/remote camera to server (/ws/video)")
     table.add_row("voice", "voice [on|off|status|test]", "Enable, disable, check, or test local CLI voice alerts")
     table.add_row("voice verbosity", "voice verbosity <all|priority|critical>", "Set voice filtering level")
     table.add_row("voice rate", "voice rate <100-350>", "Set voice speech rate in words per minute")

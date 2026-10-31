@@ -150,7 +150,38 @@ pip install -e .
 ### Obtaining Your Public ngrok URL
 
 Copy the `Public URL` printed in Cell 5 (e.g. `https://d492-34-125-18-200.ngrok-free.app`).  
-Keep the Kaggle notebook running while using the CLI Command Center.
+Keep the Kaggle/Colab notebook running while using the CLI Command Center.
+
+---
+
+## Streaming the Camera to the Server
+
+The OptiCore server receives camera frames over WebSocket at `/ws/video`. You can stream video from your remote system using either of two methods:
+
+### Method A: Built-in Browser Camera (Easiest — Phone, Tablet, Laptop)
+1. On your remote system or phone, open **Chrome**, **Safari**, or **Edge**.
+2. Navigate to your server's root URL:
+   ```
+   https://<your-ngrok-url>.ngrok-free.app/
+   ```
+3. Select **Rear camera** or **Front camera**.
+4. Click **Start camera** and allow camera permissions.
+5. The browser will begin streaming camera frames to the server in real-time!
+
+### Method B: Headless Python Streamer (`stream_camera.py` — Raspberry Pi / USB Webcam)
+If your remote system is a Raspberry Pi or you want to stream from a USB webcam / Pi Camera directly from the terminal without opening a browser:
+```bash
+# Install OpenCV and WebSockets if not already present:
+pip install opencv-python websockets
+
+# Stream from default webcam (index 0) to server:
+python stream_camera.py --server https://<your-ngrok-url>.ngrok-free.app --camera 0
+
+# Optional flags:
+# --camera 1        Use external USB webcam index 1
+# --fps 15          Target frame rate (default: 15)
+# --show            Display local GUI preview window with server annotations
+```
 
 ---
 
@@ -167,30 +198,39 @@ opticore-cli
 Launching `opticore-cli` opens the interactive toggle menu:
 
 ```
-  Status: [Connected: https://xxxx.ngrok-free.app (38.2 ms) | Voice: ON (Priority)]
+  Server: [Connected: https://xxxx.ngrok-free.app (38.2 ms)] | Camera: Device 0 (15 FPS) | Voice: ON (PRIORITY)
 
   Use ↑/↓ arrows to navigate | [Enter] to select | [Space] to toggle | [q] to exit
 
-  ╭─────────────────────────────────────────────────────────────────────────────────────────────╮
-  │   1.  Connect to Server              Configure or test OptiCore server URL                  │
-  │ ▶ 2.  Launch Live Stream (New Window) Spawns dedicated shell window for live alerts  [POPUP] │
-  │   3.  Voice Alerts: [ ON ]           Toggle local text-to-speech alerts on or off  [TOGGLE] │
-  │   4.  Voice Verbosity: < PRIORITY >  Cycle: PRIORITY -> CRITICAL -> ALL            [TOGGLE] │
-  │   5.  Test Voice Output              Play test speech announcement                          │
-  │   6.  Server Status & GPU            View GPU hardware, device, and uptime                  │
-  │   7.  Server Health Check            Inference latency, model readiness, and FPS            │
-  │   8.  View Recent Priority Alerts    Display table of recent alerts from /events            │
-  │   9.  Performance Metrics            Processed frames, avg latency, and FPS EMA             │
-  │  10.  Configuration Settings         View and modify persistent CLI settings                │
-  │  11.  Switch to Command Prompt       Drop into classic prompt mode (opticore> )             │
-  │  12.  Exit Command Center            Safely exit OptiCore CLI Command Center                │
-  ╰─────────────────────────────────────────────────────────────────────────────────────────────╯
+  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │   1.  Connect to Server                 Configure or test OptiCore server URL (ngrok / IP)             │
+  │ ▶ 2.  Start Camera Stream (New Window)  Streams camera in a dedicated window while keeping menu active │
+  │   3.  Stream Camera in This Terminal    Captures and streams camera frames right here  [IN-PLACE]       │
+  │   4.  Camera Device: < Device 0 >       Cycle camera: Device 0 -> Device 1 -> Custom   [TOGGLE]        │
+  │   5.  Camera Local Preview: [ OFF ]     Toggle local GUI window with server detections [TOGGLE]        │
+  │   6.  Open Web Camera in Browser        Launch native OptiCore camera web app in browser [BROWSER]     │
+  │   7.  Launch Alert Logs (New Window)    Spawns dedicated shell window for live detection alerts [POPUP]│
+  │   8.  Stream Alert Logs in Terminal     Runs detection alert stream in this terminal   [IN-PLACE]      │
+  │   9.  Voice Alerts: [ ON ]              Toggle local text-to-speech alerts on or off   [TOGGLE]        │
+  │  10.  Voice Verbosity: < PRIORITY >     Cycle: PRIORITY (P1/P2) -> CRITICAL (P1) -> ALL [TOGGLE]      │
+  │  11.  Test Voice Output                 Play test speech announcement through speakers                 │
+  │  12.  Server Status & GPU               Inspect GPU model, compute device, uptime, and active camera   │
+  │  13.  Server Health Check               Check inference latency, model readiness, and stream rate      │
+  │  14.  View Recent Priority Alerts       Display table of recent detection alerts from /events          │
+  │  15.  Performance Metrics               View processed frames, avg latency, and FPS EMA                │
+  │  16.  Configuration Settings            View or update persistent CLI settings                         │
+  │  17.  Switch to Command Prompt          Drop into classic interactive prompt (opticore> )              │
+  │  18.  Exit Command Center               Safely exit OptiCore CLI Command Center                        │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 - **Navigate:** Use `↑` and `↓` arrow keys.
-- **Toggle Voice Alerts:** Press `Space` or `Enter` on row 3 to immediately toggle Voice alerts `[ ON ]` / `[ OFF ]`.
-- **Toggle Verbosity:** Press `Space` or `Enter` on row 4 to cycle verbosity `< PRIORITY >` / `< CRITICAL >` / `< ALL >`.
-- **Dedicated Log Stream Window:** Selecting row 2 ("Launch Live Stream in New Window") spawns a **brand-new shell window** dedicated to streaming detection alerts, keeping your main menu open in parallel!
+- **Toggle Camera Device:** Press `Space` or `Enter` on row 4 to cycle between Camera Device 0 (default webcam), Device 1 (USB/external camera), or custom input.
+- **Toggle Preview Window:** Press `Space` or `Enter` on row 5 to toggle the local OpenCV preview window `[ ON ]` / `[ OFF ]`.
+- **Start Camera Stream:** Select row 2 ("Start Camera Stream in New Window") to launch camera streaming in a dedicated shell window without blocking the menu!
+- **Open Browser Camera:** Select row 6 to launch the native camera web app in your browser with one click.
+- **Toggle Voice Alerts:** Press `Space` or `Enter` on row 9 to immediately toggle Voice alerts `[ ON ]` / `[ OFF ]`.
+- **Dedicated Log Stream Window:** Selecting row 7 ("Launch Alert Logs in New Window") spawns a dedicated shell window for streaming detection alerts in parallel.
 
 ---
 
@@ -202,6 +242,8 @@ All commands can be run via the arrow menu, inside the interactive shell (`optic
 | :--- | :--- | :--- |
 | `menu` | `opticore-cli menu` | Launch the interactive arrow-key toggle menu |
 | `connect <url>` | `opticore-cli connect <url>` | Test connectivity, verify model, and save URL |
+| `stream [-w] [-c 0]` | `opticore-cli stream [-w] [-c 0]` | Stream local/remote camera to server (`-w` opens in separate window) |
+| `camera` | `python stream_camera.py` | Standalone camera streamer for Raspberry Pi / USB webcams |
 | `disconnect` | — | Disconnect from current server session |
 | `status` | `opticore-cli status` | View full server status, GPU hardware, and camera stream state |
 | `health` | `opticore-cli health` | View server health, model status, device, and FPS |

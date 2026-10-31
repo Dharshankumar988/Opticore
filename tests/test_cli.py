@@ -100,3 +100,11 @@ def test_arg_parser_subcommands():
     assert args.command == "monitor"
     assert args.poll == 0.5
     assert args.voice is True
+
+    # Stream (camera)
+    args = parser.parse_args(["stream", "--camera", "1", "--fps", "20", "--show", "--new-window"])
+    assert args.command == "stream"
+    assert args.camera == "1"
+    assert args.fps == 20.0
+    assert args.show is True
+    assert args.new_window is True

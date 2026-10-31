@@ -207,6 +207,46 @@ class OptiCoreCLI:
         )
         monitor.run()
 
+    def handle_camera_stream(self, args: List[str]) -> None:
+        """Streams local camera to server over WebSocket (/ws/video)."""
+        if not self.client.is_configured():
+            console.print("[red]Not connected to any server. Run 'connect <url>' first.[/red]")
+            return
+
+        new_window = "--new-window" in args or "-w" in args
+        show = "--show" in args or self.config.camera_show_preview
+        cam_src = self.config.camera_source
+
+        for idx, a in enumerate(args):
+            if a in {"--camera", "-c"} and idx + 1 < len(args):
+                cam_src = args[idx + 1]
+
+        if new_window:
+            from opticore_cli.menu import launch_camera_in_new_window
+            ok, msg = launch_camera_in_new_window(
+                server_url=self.client.base_url,
+                camera_source=cam_src,
+                fps=self.config.camera_fps,
+                width=self.config.camera_width,
+                quality=self.config.camera_quality,
+                show_window=show,
+            )
+            if ok:
+                console.print(f"[bold green]✓ {msg}[/bold green]")
+            else:
+                console.print(f"[bold yellow]! {msg}[/bold yellow]")
+            return
+
+        from opticore_cli.camera import run_camera_stream_sync
+        run_camera_stream_sync(
+            server_url=self.client.base_url,
+            camera_source=cam_src,
+            width=self.config.camera_width,
+            target_fps=self.config.camera_fps,
+            quality=self.config.camera_quality,
+            show_window=show,
+        )
+
     def handle_voice(self, args: List[str]) -> None:
         """Controls local voice alerts."""
         if not args:
@@ -379,8 +419,11 @@ class OptiCoreCLI:
         elif cmd in {"events", "alerts"}:
             self.handle_events(args)
 
-        elif cmd in {"monitor", "logs", "stream"}:
+        elif cmd in {"monitor", "logs"}:
             self.handle_monitor(args)
+
+        elif cmd in {"camera", "stream", "stream-camera"}:
+            self.handle_camera_stream(args)
 
         elif cmd in {"voice", "audio", "speech"}:
             self.handle_voice(args)
@@ -476,6 +519,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p_mon.add_argument("--poll", "-p", type=float, default=1.0, help="Polling interval in seconds")
     p_mon.add_argument("--new-window", "-w", action="store_true", help="Open stream in a dedicated new shell window")
 
+    # stream (camera)
+    p_stream = subparsers.add_parser("stream", parents=[common_parent], help="Stream local/remote camera to server (/ws/video)")
+    p_stream.add_argument("--camera", "-c", default=None, help="Camera device index (0, 1) or video source")
+    p_stream.add_argument("--fps", type=float, default=None, help="Target frames per second")
+    p_stream.add_argument("--width", type=int, default=None, help="Frame width in pixels")
+    p_stream.add_argument("--quality", type=int, default=None, help="JPEG compression quality (1-100)")
+    p_stream.add_argument("--show", action="store_true", help="Display local preview window with server annotations")
+    p_stream.add_argument("--new-window", "-w", action="store_true", help="Open camera stream in a dedicated new shell window")
+
     # voice
     p_voice = subparsers.add_parser("voice", parents=[common_parent], help="Control or test voice alerts")
     p_voice.add_argument("action", nargs="?", default="status", choices=["on", "off", "status", "test"], help="Voice action")
@@ -537,6 +589,16 @@ def main(argv: Optional[List[str]] = None) -> None:
         if getattr(args, "new_window", False):
             mon_args.append("--new-window")
         cli.handle_monitor(mon_args)
+        cli.shutdown()
+    elif args.command == "stream":
+        stream_args = []
+        if args.camera is not None:
+            stream_args.extend(["--camera", str(args.camera)])
+        if args.show:
+            stream_args.append("--show")
+        if getattr(args, "new_window", False):
+            stream_args.append("--new-window")
+        cli.handle_camera_stream(stream_args)
         cli.shutdown()
     elif args.command == "voice":
         cli.handle_voice([args.action])

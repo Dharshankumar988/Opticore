@@ -26,6 +26,11 @@ class OptiCoreConfig:
     voice_volume: float = 1.0
     voice_cooldown: float = 7.0
     max_log_history: int = 500
+    camera_source: str = "0"
+    camera_fps: float = 15.0
+    camera_width: int = 640
+    camera_quality: int = 65
+    camera_show_preview: bool = False
 
     @classmethod
     def defaults(cls) -> "OptiCoreConfig":
@@ -112,6 +117,18 @@ class ConfigManager:
                 data["voice_cooldown"] = float(os.environ["OPTICORE_VOICE_COOLDOWN"])
             except ValueError:
                 pass
+
+        if "OPTICORE_CAMERA_SOURCE" in os.environ:
+            data["camera_source"] = os.environ["OPTICORE_CAMERA_SOURCE"].strip()
+
+        if "OPTICORE_CAMERA_FPS" in os.environ:
+            try:
+                data["camera_fps"] = float(os.environ["OPTICORE_CAMERA_FPS"])
+            except ValueError:
+                pass
+
+        if "OPTICORE_CAMERA_SHOW_PREVIEW" in os.environ:
+            data["camera_show_preview"] = os.environ["OPTICORE_CAMERA_SHOW_PREVIEW"].strip().lower() in {"1", "true", "yes", "on"}
 
         self.config = OptiCoreConfig.from_dict(data)
         return self.config

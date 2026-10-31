@@ -5,6 +5,7 @@ import platform
 import subprocess
 import sys
 import time
+import webbrowser
 from typing import Callable, Dict, List, Optional, Tuple
 
 from rich import box
@@ -134,7 +135,6 @@ def launch_in_new_window(server_url: str = "", poll: float = 1.0, voice: bool = 
                 return False, f"Failed to spawn new window: {e2}"
 
     elif system == "linux":
-        # Search for available terminal emulators
         terminals = [
             ("x-terminal-emulator", ["x-terminal-emulator", "-e"]),
             ("lxterminal", ["lxterminal", "-e"]),
@@ -176,6 +176,85 @@ def launch_in_new_window(server_url: str = "", poll: float = 1.0, voice: bool = 
     return False, "Unsupported platform for automatic window spawning."
 
 
+def launch_camera_in_new_window(
+    server_url: str = "",
+    camera_source: str = "0",
+    fps: float = 15.0,
+    width: int = 640,
+    quality: int = 65,
+    show_window: bool = False,
+) -> Tuple[bool, str]:
+    """Spawns a dedicated new shell window for streaming camera frames to /ws/video."""
+    py_exe = sys.executable
+    system = platform.system().lower()
+
+    cmd_args = [
+        py_exe, "-m", "opticore_cli.camera",
+        "--server", server_url,
+        "--camera", str(camera_source),
+        "--fps", str(fps),
+        "--width", str(width),
+        "--quality", str(quality),
+    ]
+    if show_window:
+        cmd_args.append("--show")
+
+    if system == "windows":
+        try:
+            ps_cmd = f"& '{py_exe}' -m opticore_cli.camera --server '{server_url}' --camera '{camera_source}' --fps {fps} --width {width} --quality {quality}"
+            if show_window:
+                ps_cmd += " --show"
+
+            subprocess.Popen(
+                ["powershell.exe", "-NoExit", "-Command", ps_cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            return True, "Launched camera stream in a new PowerShell window."
+        except Exception as e:
+            try:
+                subprocess.Popen(cmd_args, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                return True, "Launched camera stream in a new console window."
+            except Exception as e2:
+                return False, f"Failed to spawn camera window: {e2}"
+
+    elif system == "linux":
+        terminals = [
+            ("x-terminal-emulator", ["x-terminal-emulator", "-e"]),
+            ("lxterminal", ["lxterminal", "-e"]),
+            ("gnome-terminal", ["gnome-terminal", "--"]),
+            ("xfce4-terminal", ["xfce4-terminal", "-e"]),
+            ("xterm", ["xterm", "-e"]),
+        ]
+        cmd_str = f"'{py_exe}' -m opticore_cli.camera --server '{server_url}' --camera '{camera_source}' --fps {fps} --width {width} --quality {quality}"
+        if show_window:
+            cmd_str += " --show"
+
+        for name, prefix in terminals:
+            try:
+                which = subprocess.run(["which", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if which.returncode == 0:
+                    if name == "gnome-terminal":
+                        subprocess.Popen(prefix + ["bash", "-c", f"{cmd_str}; exec bash"])
+                    else:
+                        subprocess.Popen(prefix + [f"bash -c \"{cmd_str}; exec bash\""])
+                    return True, f"Launched camera stream in a new {name} window."
+            except Exception:
+                continue
+
+        return False, "No desktop terminal emulator found. Use in-place camera streaming."
+
+    elif system == "darwin":
+        try:
+            cmd_str = f"'{py_exe}' -m opticore_cli.camera --server '{server_url}' --camera '{camera_source}'"
+            osascript = f'tell application "Terminal" to do script "{cmd_str}"'
+            subprocess.Popen(["osascript", "-e", osascript])
+            return True, "Launched camera stream in a new Terminal window."
+        except Exception as e:
+            return False, f"Failed to open Terminal window: {e}"
+
+    return False, "Unsupported platform for automatic window spawning."
+
+
 class InteractiveMenu:
     """Renders and manages the arrow-key toggle menu."""
 
@@ -199,6 +278,12 @@ class InteractiveMenu:
         else:
             conn_status = "[yellow]Not Configured[/yellow]"
 
+        # Camera configurations
+        cam_src = str(getattr(self.cli.config, "camera_source", "0"))
+        cam_label = f"Device {cam_src} (Webcam)" if cam_src in ("0", "1") else f"Src: {cam_src[:14]}"
+        cam_preview = getattr(self.cli.config, "camera_show_preview", False)
+        preview_badge = "[bold green]ON[/bold green]" if cam_preview else "[dim]OFF[/dim]"
+
         return [
             {
                 "id": "connect",
@@ -207,32 +292,69 @@ class InteractiveMenu:
                 "desc": "Configure or test OptiCore server URL (ngrok / IP)",
                 "action": "connect",
             },
+            # --- Camera Controls ---
+            {
+                "id": "camera_stream_new",
+                "label": "Start Camera Stream (New Window)",
+                "tag": "[bold cyan]CAMERA POPUP[/bold cyan]",
+                "desc": "Streams camera in a dedicated window while keeping this menu active",
+                "action": "camera_stream_new",
+            },
+            {
+                "id": "camera_stream_here",
+                "label": "Stream Camera in This Terminal",
+                "tag": "[dim]IN-PLACE[/dim]",
+                "desc": "Captures and streams camera frames right here (Press Ctrl+C to return)",
+                "action": "camera_stream_here",
+            },
+            {
+                "id": "camera_source_toggle",
+                "label": f"Camera Device: < {cam_label} >",
+                "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
+                "desc": "Cycle camera source: Device 0 -> Device 1 -> Custom input",
+                "action": "camera_source_toggle",
+            },
+            {
+                "id": "camera_preview_toggle",
+                "label": f"Camera Local Preview: [ {preview_badge} ]",
+                "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
+                "desc": "Toggle local GUI window showing server-annotated detections",
+                "action": "camera_preview_toggle",
+            },
+            {
+                "id": "camera_browser",
+                "label": "Open Web Camera in Browser",
+                "tag": "[bold magenta]BROWSER UI[/bold magenta]",
+                "desc": "Launch the native OptiCore camera web app in your default browser",
+                "action": "camera_browser",
+            },
+            # --- Detection Alert Monitoring ---
             {
                 "id": "monitor_new",
-                "label": "Launch Live Stream (New Window)",
-                "tag": "[bold cyan]POPUP WINDOW[/bold cyan]",
+                "label": "Launch Alert Logs (New Window)",
+                "tag": "[bold cyan]LOGS POPUP[/bold cyan]",
                 "desc": "Spawns a dedicated new shell window for streaming live detection alerts",
                 "action": "monitor_new",
             },
             {
                 "id": "monitor_here",
-                "label": "Stream Logs in This Window",
+                "label": "Stream Alert Logs in This Terminal",
                 "tag": "[dim]IN-PLACE[/dim]",
-                "desc": "Runs detection stream in this terminal (Press Ctrl+C to return to menu)",
+                "desc": "Runs detection alert stream in this terminal (Ctrl+C to return to menu)",
                 "action": "monitor_here",
             },
             {
                 "id": "voice_toggle",
                 "label": f"Voice Alerts: [ {voice_badge} ]",
-                "tag": "[bold yellow]PRESS SPACE / ENTER[/bold yellow]",
+                "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
                 "desc": "Toggle local text-to-speech alerts on or off",
                 "action": "toggle_voice",
             },
             {
                 "id": "voice_verb",
                 "label": f"Voice Verbosity: < {verb} >",
-                "tag": "[bold yellow]PRESS SPACE / ENTER[/bold yellow]",
-                "desc": "Cycle alert verbosity: PRIORITY (P1/P2) -> CRITICAL (P1 only) -> ALL",
+                "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
+                "desc": "Cycle alert verbosity: PRIORITY (P1/P2) -> CRITICAL (P1) -> ALL",
                 "action": "cycle_verbosity",
             },
             {
@@ -242,6 +364,7 @@ class InteractiveMenu:
                 "desc": "Play a test speech announcement through local speakers",
                 "action": "test_voice",
             },
+            # --- Server Diagnostics & Settings ---
             {
                 "id": "status",
                 "label": "Server Status & GPU",
@@ -274,13 +397,13 @@ class InteractiveMenu:
                 "id": "config",
                 "label": "Configuration Settings",
                 "tag": "[dim]SETTINGS[/dim]",
-                "desc": "View or update local CLI settings (timeout, speech rate, cooldown)",
+                "desc": "View or update local CLI settings (timeout, camera, speech rate)",
                 "action": "config",
             },
             {
                 "id": "cli_prompt",
                 "label": "Switch to Command Prompt",
-                "tag": "[dim]opticore> [/dim]",
+                "tag": "[dim]opticore>[/dim]",
                 "desc": "Drop into classic interactive command-line mode (type 'menu' to return)",
                 "action": "cli_prompt",
             },
@@ -300,11 +423,15 @@ class InteractiveMenu:
 
         items = self.get_menu_items()
 
-        # Connection & Voice Summary Bar
+        # Connection, Camera & Voice Summary Bar
         v_state = "[bold green]ON[/bold green]" if self.cli.voice.enabled else "[bold red]OFF[/bold red]"
         conn_str = f"[bold green]{self.cli.client.base_url}[/bold green]" if self.cli.client.is_configured() else "[bold yellow]Disconnected[/bold yellow]"
+        cam_src = getattr(self.cli.config, "camera_source", "0")
+        cam_fps = getattr(self.cli.config, "camera_fps", 15.0)
+        cam_str = f"Device {cam_src} ({cam_fps:.0f} FPS)"
+
         summary_panel = Panel(
-            f" [bold white]Server:[/bold white] {conn_str}   |   [bold white]Voice Alerts:[/bold white] {v_state} ({self.cli.voice.verbosity.upper()})   |   [bold white]Audio Engine:[/bold white] {self.cli.voice.backend_name}",
+            f" [bold white]Server:[/bold white] {conn_str}   |   [bold white]Camera:[/bold white] [bold cyan]{cam_str}[/bold cyan]   |   [bold white]Voice Alerts:[/bold white] {v_state} ({self.cli.voice.verbosity.upper()})",
             box=box.SIMPLE,
             style="cyan",
         )
@@ -317,8 +444,8 @@ class InteractiveMenu:
         table = Table(box=box.ROUNDED, show_header=False, expand=True, padding=(0, 1))
         table.add_column("Cursor", width=3, justify="center")
         table.add_column("Number", width=4, justify="right", style="dim")
-        table.add_column("Option", width=36)
-        table.add_column("Status / Badge", width=24)
+        table.add_column("Option", width=38)
+        table.add_column("Status / Badge", width=22)
         table.add_column("Description", style="dim")
 
         for i, item in enumerate(items):
@@ -384,6 +511,85 @@ class InteractiveMenu:
                     self.cli.voice.set_verbosity(next_verb)
                     self.cli.config.voice_verbosity = next_verb
                     self.cli.config_manager.save()
+
+                elif action == "camera_source_toggle":
+                    curr_src = str(getattr(self.cli.config, "camera_source", "0"))
+                    if curr_src == "0":
+                        self.cli.config.camera_source = "1"
+                        self.cli.config_manager.save()
+                    elif curr_src == "1":
+                        os.system("cls" if os.name == "nt" else "clear")
+                        console.print("[cyan]Configure Camera Device Source[/cyan]")
+                        console.print("Currently selected: [bold white]Device 1[/bold white]")
+                        console.print("Enter camera index (e.g. 0, 1, 2) or video file / RTSP URL [Leave blank for Device 0]:")
+                        try:
+                            val = input("camera source> ").strip()
+                            self.cli.config.camera_source = val if val else "0"
+                            self.cli.config_manager.save()
+                            console.print(f"[green]Saved camera source: {self.cli.config.camera_source}[/green]")
+                        except Exception:
+                            pass
+                    else:
+                        self.cli.config.camera_source = "0"
+                        self.cli.config_manager.save()
+
+                elif action == "camera_preview_toggle":
+                    new_preview = not getattr(self.cli.config, "camera_show_preview", False)
+                    self.cli.config.camera_show_preview = new_preview
+                    self.cli.config_manager.save()
+
+                elif action == "camera_browser":
+                    os.system("cls" if os.name == "nt" else "clear")
+                    if not self.cli.client.is_configured():
+                        console.print("[bold red]Server URL is not configured. Connect first![/bold red]")
+                    else:
+                        url = self.cli.client.base_url
+                        console.print(f"[cyan]Opening OptiCore Live Vision web camera in your default browser:[/cyan]\n[bold green]{url}[/bold green]\n")
+                        try:
+                            webbrowser.open(url)
+                            console.print("[green]Browser launched! Select camera and tap 'Start camera' to begin streaming.[/green]")
+                        except Exception as e:
+                            console.print(f"[yellow]Could not launch browser automatically: {e}[/yellow]")
+                            console.print(f"Please open this URL manually in Chrome/Safari/Edge: {url}")
+                    self.pause_for_user()
+
+                elif action == "camera_stream_new":
+                    os.system("cls" if os.name == "nt" else "clear")
+                    if not self.cli.client.is_configured():
+                        console.print("[bold red]Cannot start camera stream: Server URL is not configured. Connect first![/bold red]")
+                    else:
+                        console.print("[bold cyan]Spawning dedicated camera streaming window...[/bold cyan]")
+                        ok, msg = launch_camera_in_new_window(
+                            server_url=self.cli.client.base_url,
+                            camera_source=self.cli.config.camera_source,
+                            fps=self.cli.config.camera_fps,
+                            width=self.cli.config.camera_width,
+                            quality=self.cli.config.camera_quality,
+                            show_window=self.cli.config.camera_show_preview,
+                        )
+                        if ok:
+                            console.print(f"[bold green]✓ {msg}[/bold green]")
+                            console.print("[dim]The camera is now capturing and streaming frames to the server in that dedicated window.[/dim]")
+                            console.print("[dim]You can now launch the alert monitor in another window or view results below![/dim]")
+                        else:
+                            console.print(f"[bold yellow]! {msg}[/bold yellow]")
+                    self.pause_for_user()
+
+                elif action == "camera_stream_here":
+                    os.system("cls" if os.name == "nt" else "clear")
+                    if not self.cli.client.is_configured():
+                        console.print("[bold red]Cannot stream camera: Server URL is not configured. Connect first![/bold red]")
+                    else:
+                        from opticore_cli.camera import run_camera_stream_sync
+                        run_camera_stream_sync(
+                            server_url=self.cli.client.base_url,
+                            camera_source=self.cli.config.camera_source,
+                            width=self.cli.config.camera_width,
+                            target_fps=self.cli.config.camera_fps,
+                            quality=self.cli.config.camera_quality,
+                            show_window=self.cli.config.camera_show_preview,
+                        )
+                    self.pause_for_user()
 
                 elif action == "test_voice":
                     os.system("cls" if os.name == "nt" else "clear")
@@ -454,7 +660,6 @@ class InteractiveMenu:
                     os.system("cls" if os.name == "nt" else "clear")
                     console.print("[bold cyan]Entering Command Prompt mode. Type 'menu' to return to toggle menu.[/bold cyan]\n")
                     self.cli.run_interactive()
-                    # When interactive finishes, check if still running
                     if not self.cli.running:
                         self.running = False
 
