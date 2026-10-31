@@ -108,9 +108,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Open a terminal on your Raspberry Pi:
 
 ```bash
-# 1. Update system packages and install speech synthesizer packages
+# 1. Update system packages and install speech synthesizer and video packages
 # (Note: on Raspberry Pi OS Bookworm / Debian 12, espeak-ng is the modern standard package)
-sudo apt update && sudo apt install -y git python3-pip python3-venv espeak-ng libespeak-ng1
+sudo apt update && sudo apt install -y git python3-pip python3-venv espeak-ng libespeak-ng1 libgl1 libglib2.0-0
 
 # 2. Clone the repository from GitHub
 git clone https://github.com/Dharshankumar988/Opticore.git
@@ -198,89 +198,231 @@ opticore-cli
 Launching `opticore-cli` opens the interactive toggle menu:
 
 ```
-  Server: [Connected: https://xxxx.ngrok-free.app (38.2 ms)] | Camera: Device 0 (15 FPS) | Voice: ON (PRIORITY)
+  Server: [Connected: https://xxxx.ngrok-free.app (38.2 ms)] | Camera Stream: [ON (STREAMING)] · Device 0 (15 FPS) | Voice: ON (PRIORITY)
 
   Use ↑/↓ arrows to navigate | [Enter] to select | [Space] to toggle | [q] to exit
 
   ╭────────────────────────────────────────────────────────────────────────────────────────────────────────╮
   │   1.  Connect to Server                 Configure or test OptiCore server URL (ngrok / IP)             │
-  │ ▶ 2.  Start Camera Stream (New Window)  Streams camera in a dedicated window while keeping menu active │
-  │   3.  Stream Camera in This Terminal    Captures and streams camera frames right here  [IN-PLACE]       │
-  │   4.  Camera Device: < Device 0 >       Cycle camera: Device 0 -> Device 1 -> Custom   [TOGGLE]        │
-  │   5.  Camera Local Preview: [ OFF ]     Toggle local GUI window with server detections [TOGGLE]        │
-  │   6.  Open Web Camera in Browser        Launch native OptiCore camera web app in browser [BROWSER]     │
-  │   7.  Launch Alert Logs (New Window)    Spawns dedicated shell window for live detection alerts [POPUP]│
-  │   8.  Stream Alert Logs in Terminal     Runs detection alert stream in this terminal   [IN-PLACE]      │
-  │   9.  Voice Alerts: [ ON ]              Toggle local text-to-speech alerts on or off   [TOGGLE]        │
-  │  10.  Voice Verbosity: < PRIORITY >     Cycle: PRIORITY (P1/P2) -> CRITICAL (P1) -> ALL [TOGGLE]      │
-  │  11.  Test Voice Output                 Play test speech announcement through speakers                 │
-  │  12.  Server Status & GPU               Inspect GPU model, compute device, uptime, and active camera   │
-  │  13.  Server Health Check               Check inference latency, model readiness, and stream rate      │
-  │  14.  View Recent Priority Alerts       Display table of recent detection alerts from /events          │
-  │  15.  Performance Metrics               View processed frames, avg latency, and FPS EMA                │
-  │  16.  Configuration Settings            View or update persistent CLI settings                         │
-  │  17.  Switch to Command Prompt          Drop into classic interactive prompt (opticore> )              │
-  │  18.  Exit Command Center               Safely exit OptiCore CLI Command Center                        │
+  │ ▶ 2.  Camera Stream: [ ON ]             Turn camera stream ON or OFF directly from CLI [TOGGLE]        │
+  │   3.  Camera Device: < Device 0 >       Detect connected cameras, show resolutions, and select device  │
+  │   4.  Camera Preview Window: [ OFF ]    Toggle local GUI window with server detections [TOGGLE]        │
+  │   5.  Stream Camera (Separate Window)   Streams camera in a dedicated popup window     [POPUP]         │
+  │   6.  Launch Alert Logs (New Window)    Spawns dedicated shell window for live detection alerts [POPUP]│
+  │   7.  Stream Alert Logs in Terminal     Runs detection alert stream in this terminal   [IN-PLACE]      │
+  │   8.  Voice Alerts: [ ON ]              Toggle local text-to-speech alerts on or off   [TOGGLE]        │
+  │   9.  Voice Verbosity: < PRIORITY >     Cycle: PRIORITY (P1/P2) -> CRITICAL (P1) -> ALL [TOGGLE]      │
+  │  10.  Test Voice Output                 Play test speech announcement through speakers                 │
+  │  11.  Server Status & GPU               Inspect GPU model, compute device, uptime, and active camera   │
+  │  12.  Server Health Check               Check inference latency, model readiness, and stream rate      │
+  │  13.  View Recent Priority Alerts       Display table of recent detection alerts from /events          │
+  │  14.  Performance Metrics               View processed frames, avg latency, and FPS EMA                │
+  │  15.  Configuration Settings            View or update persistent CLI settings                         │
+  │  16.  Switch to Command Prompt          Drop into classic interactive prompt (opticore> )              │
+  │  17.  Exit Command Center               Safely exit OptiCore CLI Command Center                        │
   ╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- **Navigate:** Use `↑` and `↓` arrow keys.
-- **Toggle Camera Device:** Press `Space` or `Enter` on row 4 to cycle between Camera Device 0 (default webcam), Device 1 (USB/external camera), or custom input.
-- **Toggle Preview Window:** Press `Space` or `Enter` on row 5 to toggle the local OpenCV preview window `[ ON ]` / `[ OFF ]`.
-- **Start Camera Stream:** Select row 2 ("Start Camera Stream in New Window") to launch camera streaming in a dedicated shell window without blocking the menu!
-- **Open Browser Camera:** Select row 6 to launch the native camera web app in your browser with one click.
-- **Toggle Voice Alerts:** Press `Space` or `Enter` on row 9 to immediately toggle Voice alerts `[ ON ]` / `[ OFF ]`.
-- **Dedicated Log Stream Window:** Selecting row 7 ("Launch Alert Logs in New Window") spawns a dedicated shell window for streaming detection alerts in parallel.
+- **Direct Camera Toggle:** Press `Space` or `Enter` on row 2 (**Camera Stream**) to immediately start or stop camera streaming directly from the CLI to your server URL. No browser needed!
+- **Detect & Switch Cameras:** Select row 3 (**Camera Device**) to view all connected cameras, their hardware resolutions, and switch between them.
+- **Toggle Preview Window:** Press `Space` or `Enter` on row 4 to toggle the local OpenCV preview window `[ ON ]` / `[ OFF ]`.
+- **Toggle Voice Alerts:** Press `Space` or `Enter` on row 8 to immediately toggle Voice alerts `[ ON ]` / `[ OFF ]`.
+- **Dedicated Log Stream Window:** Selecting row 6 ("Launch Alert Logs in New Window") spawns a dedicated shell window for streaming detection alerts in parallel.
 
 ---
 
 ## Command Reference & Examples
 
-All commands can be run via the arrow menu, inside the interactive shell (`opticore-cli interactive`), or directly from the terminal.
+The OptiCore CLI can be controlled through **three modes**:
+1. **Interactive Toggle Menu:** `opticore-cli` or `opticore-cli menu` (arrow keys + Space/Enter).
+2. **Interactive Prompt:** `opticore-cli interactive` (the `opticore>` REPL prompt).
+3. **Direct Subcommands:** Run single tasks directly from PowerShell, Bash, or automation scripts.
 
-| Interactive Command | Direct CLI Command | Description |
-| :--- | :--- | :--- |
-| `menu` | `opticore-cli menu` | Launch the interactive arrow-key toggle menu |
-| `connect <url>` | `opticore-cli connect <url>` | Test connectivity, verify model, and save URL |
-| `stream [-w] [-c 0]` | `opticore-cli stream [-w] [-c 0]` | Stream local/remote camera to server (`-w` opens in separate window) |
-| `camera` | `python stream_camera.py` | Standalone camera streamer for Raspberry Pi / USB webcams |
-| `disconnect` | — | Disconnect from current server session |
-| `status` | `opticore-cli status` | View full server status, GPU hardware, and camera stream state |
-| `health` | `opticore-cli health` | View server health, model status, device, and FPS |
-| `metrics` | `opticore-cli metrics` | View inference latency, pipeline speed, and frame counts |
-| `events [N]` | `opticore-cli events --limit N` | Display the latest `N` detection alert events (1–100) |
-| `monitor [-w]` | `opticore-cli monitor [-w]` | Stream live alerts (`-w` / `--new-window` opens in separate shell) |
-| `voice [on\|off]` | `opticore-cli voice [on\|off]` | Enable or disable client-side voice alerts |
-| `voice status` | `opticore-cli voice status` | Show TTS audio engine, rate, volume, and queue depth |
-| `voice test` | `opticore-cli voice test` | Play a test speech announcement through your speakers |
-| `voice verbosity <V>`| `opticore-cli --verbosity <V> monitor` | Set alert filtering: `all`, `priority`, or `critical` |
-| `voice rate <WPM>` | — | Adjust speech speed (100–350 words per minute, default: 180) |
-| `voice volume <VOL>`| — | Adjust volume (0.0 to 1.0 or 0–100%) |
-| `config show` | `opticore-cli config show` | Display all persistent configuration values |
-| `config set <k> <v>`| — | Update a configuration setting |
-| `config reset` | `opticore-cli config reset` | Reset all configuration parameters to default values |
-| `clear` / `cls` | — | Clear the terminal screen |
-| `exit` / `quit` | — | Safely exit the Command Center |
+> *Tip:* If you installed via `pip install -e .`, run `opticore-cli`. You can also universally run `python -m opticore_cli`.
 
-### Examples
+---
 
-#### Check Server Health
-```
-opticore> health
-```
-Outputs a panel with inference device (`cuda:0`), tracker (`bytetrack.yaml`), input resolution (`640x640`), average inference latency (`31.2 ms`), and rolling FPS (`32.1 FPS`).
+### Master Command Reference Table
 
-#### View Full Status & GPU Info
-```
-opticore> status
-```
-Outputs GPU name (e.g. `Tesla T4`), camera stream status (`Active` / `Idle`), server uptime, and deduplication policy.
+| Interactive Command | Direct Terminal Subcommand | Menu Shortcut | Description |
+| :--- | :--- | :--- | :--- |
+| `menu` | `opticore-cli menu` | — | Open the interactive arrow-key toggle menu |
+| `connect <url>` | `opticore-cli connect [url]` | Item 1 | Test connectivity, verify model, and save server URL |
+| `disconnect` | — | — | Disconnect from current server session |
+| `health` | `opticore-cli health` | Item 12 | View server health, model status, device, and rolling FPS |
+| `status` | `opticore-cli status` | Item 11 | View server status, GPU model, active camera, and uptime |
+| `metrics` | `opticore-cli metrics` | Item 14 | View inference latency, pipeline speed, and frame counters |
+| `events [--limit N]` | `opticore-cli events [-n N]` | Item 13 | Retrieve latest `N` detection alerts from `/events` (1–100) |
+| `camera on` | `opticore-cli camera on` | Item 2 | Start streaming local camera directly to server in background |
+| `camera off` | `opticore-cli camera off` | Item 2 | Stop background camera streaming |
+| `camera toggle` | `opticore-cli camera toggle` | Item 2 | Toggle camera stream ON / OFF |
+| `camera list` | `opticore-cli camera list` | Item 3 | Scan and display all connected video capture hardware |
+| `camera status` | `opticore-cli camera status` | Header | View current streaming status, device, FPS, and frames sent |
+| `stream` | `opticore-cli stream [flags]` | Item 5 | Foreground camera streaming (`-w` opens in separate window) |
+| `monitor` | `opticore-cli monitor [flags]` | Item 6 / 7 | Stream live detection alerts (`-w` opens in new window) |
+| `voice on` / `off` | `opticore-cli voice [on\|off]` | Item 8 | Enable or disable local client-side voice alerts |
+| `voice status` | `opticore-cli voice status` | — | Display TTS engine, rate, volume, queue depth, and hardware |
+| `voice test` | `opticore-cli voice test` | Item 10 | Play a test speech announcement through your speakers |
+| `voice verbosity <V>`| `opticore-cli --verbosity <V> monitor` | Item 9 | Set alert filter: `all`, `priority` (P1/P2), or `critical` (P1) |
+| `voice rate <WPM>` | — | Settings | Adjust speech rate (100–350 words per minute, default: 180) |
+| `voice volume <VOL>`| — | Settings | Adjust volume (`0.0` to `1.0` or percentage `0-100`) |
+| `voice cooldown <S>` | — | Settings | Set message deduplication suppression window in seconds |
+| `config show` | `opticore-cli config show` | Item 15 | Display all active configuration settings and paths |
+| `config set <k> <v>`| — | Settings | Update a persistent setting (e.g. `config set poll_interval 0.5`) |
+| `config reset` | `opticore-cli config reset` | — | Reset all configuration settings to factory defaults |
+| `clear` / `cls` | — | — | Clear terminal screen and redraw header banner |
+| `help` | — | — | Render full colorized command reference card |
+| `exit` / `quit` / `q` | — | Item 17 | Safely stop workers and exit the Command Center |
 
-#### Check Recent Events
+---
+
+### Global Flags
+
+These flags can be prepended or passed to any direct subcommand:
+
+```bash
+opticore-cli [GLOBAL_FLAGS] <SUBCOMMAND> [SUBCOMMAND_FLAGS]
 ```
-opticore> events 10
+
+- `--url <URL>`: Override the OptiCore server address (ngrok public URL or IP).
+- `--voice`: Enable local voice announcements during execution.
+- `--verbosity <all|priority|critical>`: Set voice alert filtering level.
+- `--timeout <SECONDS>`: Set HTTP request timeout in seconds (default: `6.0`).
+
+---
+
+### Direct Terminal Subcommands & Flags
+
+#### 1. Server Connection & Health Inspection
+```bash
+# Test connection to an ngrok or IP server and save it to config:
+opticore-cli connect https://your-tunnel.ngrok-free.app
+
+# Check server health, active YOLO model, and compute device:
+opticore-cli health
+
+# Check GPU hardware, server uptime, and camera status:
+opticore-cli status
+
+# View pipeline throughput and average inference latency:
+opticore-cli metrics
+
+# Fetch the last 25 detection alert events:
+opticore-cli events --limit 25
 ```
-Displays a table of the 10 most recent detection events with timestamp, priority badge, class, tracking ID, position, movement, risk score, and alert message.
+
+#### 2. Camera Streaming Directly to Server
+```bash
+# Turn camera stream ON in the background (streams directly to server URL):
+opticore-cli camera on
+
+# Turn camera stream OFF:
+opticore-cli camera off
+
+# Toggle camera stream ON / OFF:
+opticore-cli camera toggle
+
+# Detect all connected hardware cameras (Device 0, Device 1, USB webcams):
+opticore-cli camera list
+
+# Check camera streaming status, FPS, and frames sent:
+opticore-cli camera status
+
+# Run live foreground camera streaming:
+opticore-cli stream --camera 0 --fps 15 --width 640 --quality 75
+
+# Run camera streamer in a dedicated new shell window:
+opticore-cli stream --new-window
+
+# Stream camera with local OpenCV GUI preview window:
+opticore-cli stream --show
+```
+
+#### 3. Live Detection Alert Monitoring
+```bash
+# Stream live priority alerts in the current terminal:
+opticore-cli monitor
+
+# Stream alerts with custom polling frequency (every 0.5 seconds):
+opticore-cli monitor --poll 0.5
+
+# Launch alert stream in a dedicated popup shell window:
+opticore-cli monitor --new-window
+
+# Stream alerts with live text-to-speech enabled:
+opticore-cli monitor --voice --verbosity priority
+```
+
+#### 4. Voice Alert Management
+```bash
+# Enable or disable client-side voice alerts:
+opticore-cli voice on
+opticore-cli voice off
+
+# Inspect TTS audio backend, volume, and deduplication queue:
+opticore-cli voice status
+
+# Play a test speech announcement:
+opticore-cli voice test
+```
+
+#### 5. Configuration & Offline Testing
+```bash
+# View all persistent configuration settings:
+opticore-cli config show
+
+# Reset configuration to defaults:
+opticore-cli config reset
+
+# Launch offline mock server for testing without remote GPU:
+opticore-cli mock-server --port 8000
+```
+
+---
+
+### Interactive Prompt (`opticore>`) Detailed Usage
+
+Start interactive mode with `opticore-cli interactive`:
+
+```text
+[https://distill-shrouded... | Voice:ON] opticore> help
+```
+
+#### Camera Commands
+- `camera on` (or `camera start`): Connects to the server's `/ws/video` WebSocket and streams compressed camera frames in the background. No browser required.
+- `camera off` (or `camera stop`): Cleanly releases the camera capture device and closes the WebSocket stream.
+- `camera toggle`: Quick toggle between ON and OFF.
+- `camera list` (or `camera devices`): Probes `/dev/video*` (Linux) or DirectShow (Windows) up to 5 devices, testing resolutions and listing hardware names.
+- `camera status`: Displays whether the camera is streaming, which device is active, total frames sent, and current FPS.
+- `stream [--show] [--new-window] [--camera <ID>]`: Runs camera streaming directly in the foreground or spawns a dedicated console window.
+
+#### Live Event Monitoring Commands
+- `monitor`: Starts streaming real-time alerts. Colorizes detections by risk level (`P1 CRITICAL` in red, `P2 WARNING` in orange, `P3 CAUTION` in yellow, `P4 INFO` in blue). Press `Ctrl+C` to return to prompt.
+- `monitor -w` (or `monitor --new-window`): Spawns a dedicated PowerShell / Terminal window for monitoring while keeping your current shell active.
+- `monitor --poll 0.5`: Polls every 500 ms for ultra-low latency alerts.
+
+#### Voice Commands
+- `voice on` / `voice off`: Enable or disable speech alerts.
+- `voice verbosity <all|priority|critical>`:
+  - `critical`: Speaks only urgent P1 alerts (e.g. approaching vehicles, direct potholes).
+  - `priority`: Speaks P1 and P2 alerts (default for pedestrian navigation).
+  - `all`: Speaks all recognized obstacle candidates.
+- `voice rate <100-350>`: Sets speaking speed in words per minute (default: `180`).
+- `voice volume <0.0-1.0>`: Adjusts audio volume (e.g. `voice volume 0.8` or `voice volume 80`).
+- `voice cooldown <seconds>`: Minimum seconds before repeating an identical alert (default: `7.0`).
+- `voice test`: Confirms speaker output by playing an announcement.
+
+#### Configuration Commands
+- `config show`: Displays a table of all persistent settings.
+- `config set <key> <value>`: Updates and persists any configuration parameter:
+  - `config set server_url https://xxxx.ngrok-free.app`
+  - `config set camera_source 1`
+  - `config set camera_fps 20`
+  - `config set camera_show_preview true`
+  - `config set voice_verbosity critical`
+  - `config set poll_interval 0.5`
+  - `config set timeout 8.0`
+- `config reset`: Restores all parameters to factory defaults.
 
 ---
 
@@ -447,10 +589,12 @@ The test suite validates compliance with the notebook's API specification:
 python -m pytest -v
 ```
 
-All 27 automated tests pass:
+All 37 automated tests pass:
 - **Configuration:** File loading, environment variable overrides, type coercion, and defaults.
 - **API Client:** URL normalization, health verification, status retrieval, metrics, and error diagnostics.
 - **Models:** Strict adherence to notebook schemas (P1–P4 priorities, track IDs, approach heuristics).
+- **Camera Streamer:** WebSocket frame streaming, URL normalization, hardware device discovery, and thread lifecycle.
+- **Interactive Menu:** Key handling, dynamic badges, toggles, window spawning, and device switcher.
 - **Voice Engine:** Non-overlapping queueing, verbosity filters, and 7.0-second cooldown deduplication.
 - **Live Monitor:** Continuous event polling, event key deduplication, and automatic reconnect backoff.
 - **CLI Shell:** Interactive command dispatch, argument parsing, and banner rendering.

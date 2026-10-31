@@ -108,3 +108,8 @@ def test_arg_parser_subcommands():
     assert args.fps == 20.0
     assert args.show is True
     assert args.new_window is True
+
+    # Camera on/off/status
+    args = parser.parse_args(["camera", "on"])
+    assert args.command == "camera"
+    assert args.action == "on"

@@ -26,6 +26,7 @@ from opticore_cli.ui import (
     render_status,
     render_voice_status,
 )
+from opticore_cli.camera import CameraStreamManager, detect_cameras, run_camera_stream_sync
 from opticore_cli.voice import VoiceAlertEngine
 
 
@@ -46,6 +47,7 @@ class OptiCoreCLI:
             volume=self.config.voice_volume,
             cooldown=self.config.voice_cooldown,
         )
+        self.camera_manager = CameraStreamManager(config_manager=self.config_manager)
         self.running = False
 
     def get_prompt_text(self) -> str:
@@ -207,45 +209,84 @@ class OptiCoreCLI:
         )
         monitor.run()
 
-    def handle_camera_stream(self, args: List[str]) -> None:
-        """Streams local camera to server over WebSocket (/ws/video)."""
-        if not self.client.is_configured():
-            console.print("[red]Not connected to any server. Run 'connect <url>' first.[/red]")
-            return
+    def handle_camera(self, args: List[str]) -> None:
+        """Controls background camera streaming or lists hardware cameras."""
+        action = args[0].lower() if args else "status"
 
-        new_window = "--new-window" in args or "-w" in args
-        show = "--show" in args or self.config.camera_show_preview
-        cam_src = self.config.camera_source
-
-        for idx, a in enumerate(args):
-            if a in {"--camera", "-c"} and idx + 1 < len(args):
-                cam_src = args[idx + 1]
-
-        if new_window:
-            from opticore_cli.menu import launch_camera_in_new_window
-            ok, msg = launch_camera_in_new_window(
-                server_url=self.client.base_url,
-                camera_source=cam_src,
-                fps=self.config.camera_fps,
-                width=self.config.camera_width,
-                quality=self.config.camera_quality,
-                show_window=show,
-            )
+        if action in {"on", "start"}:
+            if not self.client.is_configured():
+                console.print("[red]Not connected to any server. Run 'connect <url>' first.[/red]")
+                return
+            with console.status("[cyan]Starting camera stream to server...[/cyan]"):
+                ok, msg = self.camera_manager.start(self.client.base_url)
             if ok:
                 console.print(f"[bold green]✓ {msg}[/bold green]")
             else:
-                console.print(f"[bold yellow]! {msg}[/bold yellow]")
-            return
+                console.print(f"[bold red]Failed to start camera: {msg}[/bold red]")
 
-        from opticore_cli.camera import run_camera_stream_sync
-        run_camera_stream_sync(
-            server_url=self.client.base_url,
-            camera_source=cam_src,
-            width=self.config.camera_width,
-            target_fps=self.config.camera_fps,
-            quality=self.config.camera_quality,
-            show_window=show,
-        )
+        elif action in {"off", "stop"}:
+            ok, msg = self.camera_manager.stop()
+            console.print(f"[bold yellow]{msg}[/bold yellow]")
+
+        elif action in {"toggle"}:
+            if self.camera_manager.is_active:
+                self.camera_manager.stop()
+                console.print("[yellow]Camera stream stopped.[/yellow]")
+            else:
+                self.handle_camera(["on"])
+
+        elif action in {"status"}:
+            st = self.camera_manager.get_status_dict()
+            status_tag = "[bold green]STREAMING (ON)[/bold green]" if st["active"] else "[bold red]OFF[/bold red]"
+            console.print(f"Camera Stream: {status_tag} | Device: {st['source']} | Frames sent: {st['frames_sent']} | FPS: {st['fps']}")
+            if st.get("last_error"):
+                console.print(f"[yellow]Notice: {st['last_error']}[/yellow]")
+
+        elif action in {"list", "devices"}:
+            with console.status("[cyan]Scanning for connected cameras...[/cyan]"):
+                cams = detect_cameras(max_probe=5)
+            if not cams:
+                console.print("[yellow]No camera devices detected.[/yellow]")
+            else:
+                console.print(f"[bold cyan]Detected {len(cams)} camera device(s):[/bold cyan]")
+                for c in cams:
+                    console.print(f"  • Device {c['index']}: [white]{c['label']}[/white] ([yellow]{c['resolution']}[/yellow])")
+
+        elif action in {"stream"}:
+            new_window = "--new-window" in args or "-w" in args
+            show = "--show" in args or self.config.camera_show_preview
+            cam_src = self.config.camera_source
+            for idx, a in enumerate(args):
+                if a in {"--camera", "-c"} and idx + 1 < len(args):
+                    cam_src = args[idx + 1]
+
+            if new_window:
+                from opticore_cli.menu import launch_camera_in_new_window
+                ok, msg = launch_camera_in_new_window(
+                    server_url=self.client.base_url,
+                    camera_source=cam_src,
+                    fps=self.config.camera_fps,
+                    width=self.config.camera_width,
+                    quality=self.config.camera_quality,
+                    show_window=show,
+                )
+                if ok:
+                    console.print(f"[bold green]✓ {msg}[/bold green]")
+                else:
+                    console.print(f"[bold yellow]! {msg}[/bold yellow]")
+                return
+
+            run_camera_stream_sync(
+                server_url=self.client.base_url,
+                camera_source=cam_src,
+                width=self.config.camera_width,
+                target_fps=self.config.camera_fps,
+                quality=self.config.camera_quality,
+                show_window=show,
+            )
+
+        else:
+            console.print(f"[yellow]Usage: camera [on|off|toggle|status|list|stream][/yellow]")
 
     def handle_voice(self, args: List[str]) -> None:
         """Controls local voice alerts."""
@@ -419,11 +460,11 @@ class OptiCoreCLI:
         elif cmd in {"events", "alerts"}:
             self.handle_events(args)
 
-        elif cmd in {"monitor", "logs"}:
-            self.handle_monitor(args)
+        elif cmd in {"camera", "cam"}:
+            self.handle_camera(args)
 
-        elif cmd in {"camera", "stream", "stream-camera"}:
-            self.handle_camera_stream(args)
+        elif cmd in {"stream", "stream-camera"}:
+            self.handle_camera(["stream"] + args)
 
         elif cmd in {"voice", "audio", "speech"}:
             self.handle_voice(args)
@@ -471,6 +512,7 @@ class OptiCoreCLI:
     def shutdown(self) -> None:
         """Performs clean shutdown of CLI and background workers."""
         self.running = False
+        self.camera_manager.stop()
         self.voice.shutdown()
         console.print("[bold cyan]OptiCore CLI Command Center safely closed. Goodbye![/bold cyan]")
 
@@ -527,6 +569,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p_stream.add_argument("--quality", type=int, default=None, help="JPEG compression quality (1-100)")
     p_stream.add_argument("--show", action="store_true", help="Display local preview window with server annotations")
     p_stream.add_argument("--new-window", "-w", action="store_true", help="Open camera stream in a dedicated new shell window")
+
+    # camera
+    p_cam = subparsers.add_parser("camera", parents=[common_parent], help="Control background camera stream (on/off/status/list)")
+    p_cam.add_argument("action", nargs="?", default="status", choices=["on", "off", "toggle", "status", "list"], help="Camera action")
 
     # voice
     p_voice = subparsers.add_parser("voice", parents=[common_parent], help="Control or test voice alerts")
@@ -590,6 +636,9 @@ def main(argv: Optional[List[str]] = None) -> None:
             mon_args.append("--new-window")
         cli.handle_monitor(mon_args)
         cli.shutdown()
+    elif args.command == "camera":
+        cli.handle_camera([args.action])
+        cli.shutdown()
     elif args.command == "stream":
         stream_args = []
         if args.camera is not None:
@@ -598,7 +647,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             stream_args.append("--show")
         if getattr(args, "new_window", False):
             stream_args.append("--new-window")
-        cli.handle_camera_stream(stream_args)
+        cli.handle_camera(["stream"] + stream_args)
         cli.shutdown()
     elif args.command == "voice":
         cli.handle_voice([args.action])

@@ -5,7 +5,6 @@ import platform
 import subprocess
 import sys
 import time
-import webbrowser
 from typing import Callable, Dict, List, Optional, Tuple
 
 from rich import box
@@ -99,7 +98,6 @@ def launch_in_new_window(server_url: str = "", poll: float = 1.0, voice: bool = 
     """Spawns a dedicated new shell window for streaming live detection alerts."""
     py_exe = sys.executable
 
-    # Build command arguments
     cmd_args = [py_exe, "-m", "opticore_cli", "monitor", "--poll", str(poll)]
     if server_url:
         cmd_args.extend(["--url", server_url])
@@ -112,7 +110,6 @@ def launch_in_new_window(server_url: str = "", poll: float = 1.0, voice: bool = 
 
     if system == "windows":
         try:
-            # Launch in a new PowerShell window that stays open on completion
             ps_cmd = f"& '{py_exe}' -m opticore_cli monitor --poll {poll}"
             if server_url:
                 ps_cmd += f" --url '{server_url}'"
@@ -127,7 +124,6 @@ def launch_in_new_window(server_url: str = "", poll: float = 1.0, voice: bool = 
             )
             return True, "Launched live detection stream in a new PowerShell window."
         except Exception as e:
-            # Fallback to direct python new console
             try:
                 subprocess.Popen(cmd_args, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 return True, "Launched live detection stream in a new console window."
@@ -278,9 +274,11 @@ class InteractiveMenu:
         else:
             conn_status = "[yellow]Not Configured[/yellow]"
 
-        # Camera configurations
+        # Camera streaming status
+        cam_active = self.cli.camera_manager.is_active
+        cam_badge = "[bold green]ON (STREAMING)[/bold green]" if cam_active else "[bold red]OFF[/bold red]"
         cam_src = str(getattr(self.cli.config, "camera_source", "0"))
-        cam_label = f"Device {cam_src} (Webcam)" if cam_src in ("0", "1") else f"Src: {cam_src[:14]}"
+        cam_label = f"Device {cam_src}" if cam_src in ("0", "1") else f"Src: {cam_src[:14]}"
         cam_preview = getattr(self.cli.config, "camera_show_preview", False)
         preview_badge = "[bold green]ON[/bold green]" if cam_preview else "[dim]OFF[/dim]"
 
@@ -292,41 +290,34 @@ class InteractiveMenu:
                 "desc": "Configure or test OptiCore server URL (ngrok / IP)",
                 "action": "connect",
             },
-            # --- Camera Controls ---
+            # --- Camera Controls (Direct ON/OFF from CLI) ---
             {
-                "id": "camera_stream_new",
-                "label": "Start Camera Stream (New Window)",
-                "tag": "[bold cyan]CAMERA POPUP[/bold cyan]",
-                "desc": "Streams camera in a dedicated window while keeping this menu active",
-                "action": "camera_stream_new",
-            },
-            {
-                "id": "camera_stream_here",
-                "label": "Stream Camera in This Terminal",
-                "tag": "[dim]IN-PLACE[/dim]",
-                "desc": "Captures and streams camera frames right here (Press Ctrl+C to return)",
-                "action": "camera_stream_here",
+                "id": "camera_toggle",
+                "label": f"Camera Stream: [ {cam_badge} ]",
+                "tag": "[bold yellow]PRESS SPACE / ENTER[/bold yellow]",
+                "desc": "Turn camera stream ON or OFF directly from CLI to server URL",
+                "action": "toggle_camera_stream",
             },
             {
                 "id": "camera_source_toggle",
                 "label": f"Camera Device: < {cam_label} >",
-                "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
-                "desc": "Cycle camera source: Device 0 -> Device 1 -> Custom input",
+                "tag": "[bold yellow]DETECT & CHOOSE[/bold yellow]",
+                "desc": "Detect connected cameras, show resolutions, and select device",
                 "action": "camera_source_toggle",
             },
             {
                 "id": "camera_preview_toggle",
-                "label": f"Camera Local Preview: [ {preview_badge} ]",
+                "label": f"Camera Preview Window: [ {preview_badge} ]",
                 "tag": "[bold yellow]SPACE / ENTER[/bold yellow]",
-                "desc": "Toggle local GUI window showing server-annotated detections",
+                "desc": "Toggle local OpenCV window showing server-annotated detections",
                 "action": "camera_preview_toggle",
             },
             {
-                "id": "camera_browser",
-                "label": "Open Web Camera in Browser",
-                "tag": "[bold magenta]BROWSER UI[/bold magenta]",
-                "desc": "Launch the native OptiCore camera web app in your default browser",
-                "action": "camera_browser",
+                "id": "camera_stream_new",
+                "label": "Stream Camera (Dedicated Window)",
+                "tag": "[dim]SEPARATE CONSOLE[/dim]",
+                "desc": "Streams camera in a dedicated popup window",
+                "action": "camera_stream_new",
             },
             # --- Detection Alert Monitoring ---
             {
@@ -426,12 +417,14 @@ class InteractiveMenu:
         # Connection, Camera & Voice Summary Bar
         v_state = "[bold green]ON[/bold green]" if self.cli.voice.enabled else "[bold red]OFF[/bold red]"
         conn_str = f"[bold green]{self.cli.client.base_url}[/bold green]" if self.cli.client.is_configured() else "[bold yellow]Disconnected[/bold yellow]"
+        cam_active = self.cli.camera_manager.is_active
         cam_src = getattr(self.cli.config, "camera_source", "0")
         cam_fps = getattr(self.cli.config, "camera_fps", 15.0)
-        cam_str = f"Device {cam_src} ({cam_fps:.0f} FPS)"
+        cam_state = "[bold green]ON (STREAMING)[/bold green]" if cam_active else "[bold red]OFF[/bold red]"
+        cam_str = f"{cam_state} · Device {cam_src} ({cam_fps:.0f} FPS)"
 
         summary_panel = Panel(
-            f" [bold white]Server:[/bold white] {conn_str}   |   [bold white]Camera:[/bold white] [bold cyan]{cam_str}[/bold cyan]   |   [bold white]Voice Alerts:[/bold white] {v_state} ({self.cli.voice.verbosity.upper()})",
+            f" [bold white]Server:[/bold white] {conn_str}   |   [bold white]Camera Stream:[/bold white] {cam_str}   |   [bold white]Voice Alerts:[/bold white] {v_state} ({self.cli.voice.verbosity.upper()})",
             box=box.SIMPLE,
             style="cyan",
         )
@@ -496,7 +489,26 @@ class InteractiveMenu:
                 current_item = items[self.selected_index]
                 action = current_item["action"]
 
-                if action == "toggle_voice":
+                if action == "toggle_camera_stream":
+                    if not self.cli.client.is_configured():
+                        os.system("cls" if os.name == "nt" else "clear")
+                        console.print("[bold red]Cannot start camera: Server URL is not configured. Connect first![/bold red]")
+                        self.pause_for_user()
+                    else:
+                        if self.cli.camera_manager.is_active:
+                            self.cli.camera_manager.stop()
+                        else:
+                            with console.status("[cyan]Starting camera stream to server...[/cyan]"):
+                                ok, msg = self.cli.camera_manager.start(self.cli.client.base_url)
+                            if not ok:
+                                os.system("cls" if os.name == "nt" else "clear")
+                                console.print(f"[bold red]Failed to start camera stream:[/bold red] {msg}")
+                                if "Another camera stream is active" in msg or "producer_busy" in msg:
+                                    console.print("\n[yellow]Note: Another camera is already streaming to the server (e.g. in your browser).[/yellow]")
+                                    console.print("[yellow]Please close the browser tab or click 'Stop camera' in the browser so the CLI can take over.[/yellow]")
+                                self.pause_for_user()
+
+                elif action == "toggle_voice":
                     new_val = not self.cli.voice.enabled
                     self.cli.voice.set_enabled(new_val)
                     self.cli.config.voice_enabled = new_val
@@ -513,45 +525,86 @@ class InteractiveMenu:
                     self.cli.config_manager.save()
 
                 elif action == "camera_source_toggle":
+                    os.system("cls" if os.name == "nt" else "clear")
+                    console.print(Panel("[bold cyan]Scanning for connected cameras on this system...[/bold cyan]", box=box.ROUNDED))
+
+                    from opticore_cli.camera import detect_cameras
+                    detected = detect_cameras(max_probe=5)
+
+                    table = Table(
+                        box=box.ROUNDED,
+                        header_style="bold cyan",
+                        title="[bold cyan]Available Video Input Devices[/bold cyan]",
+                    )
+                    table.add_column("No.", justify="right", style="bold white", width=5)
+                    table.add_column("Device", style="cyan", width=12)
+                    table.add_column("Description / Hardware Name", style="white", width=38)
+                    table.add_column("Max Resolution", justify="center", style="yellow", width=16)
+                    table.add_column("Status", justify="center", width=14)
+
                     curr_src = str(getattr(self.cli.config, "camera_source", "0"))
-                    if curr_src == "0":
-                        self.cli.config.camera_source = "1"
-                        self.cli.config_manager.save()
-                    elif curr_src == "1":
-                        os.system("cls" if os.name == "nt" else "clear")
-                        console.print("[cyan]Configure Camera Device Source[/cyan]")
-                        console.print("Currently selected: [bold white]Device 1[/bold white]")
-                        console.print("Enter camera index (e.g. 0, 1, 2) or video file / RTSP URL [Leave blank for Device 0]:")
-                        try:
-                            val = input("camera source> ").strip()
-                            self.cli.config.camera_source = val if val else "0"
-                            self.cli.config_manager.save()
-                            console.print(f"[green]Saved camera source: {self.cli.config.camera_source}[/green]")
-                        except Exception:
-                            pass
+                    options_map = {}
+                    opt_num = 1
+
+                    if detected:
+                        for cam in detected:
+                            is_active = (cam["index"] == curr_src)
+                            status_str = "[bold green][ACTIVE][/bold green]" if is_active else "[dim]Available[/dim]"
+                            table.add_row(
+                                f"{opt_num}.",
+                                f"Device {cam['index']}",
+                                cam["label"],
+                                cam["resolution"],
+                                status_str,
+                            )
+                            options_map[str(opt_num)] = cam["index"]
+                            opt_num += 1
                     else:
-                        self.cli.config.camera_source = "0"
-                        self.cli.config_manager.save()
+                        table.add_row("-", "None", "No hardware cameras detected", "—", "[yellow]Offline[/yellow]")
+
+                    # Add Custom option
+                    is_custom = curr_src not in [c["index"] for c in detected] and curr_src != ""
+                    custom_status = f"[bold green][ACTIVE: {curr_src}][/bold green]" if is_custom else "[dim]Custom[/dim]"
+                    table.add_row(
+                        f"{opt_num}.",
+                        "Custom",
+                        "Enter index, video file, or RTSP stream",
+                        "—",
+                        custom_status,
+                    )
+                    options_map[str(opt_num)] = "custom"
+
+                    console.print(table)
+                    console.print(f"\nCurrently active: [bold cyan]Device {curr_src}[/bold cyan]")
+                    console.print(f"[dim]Select camera number (1-{opt_num}) or press Enter to keep current:[/dim]")
+
+                    try:
+                        choice = input("select camera> ").strip()
+                        if choice in options_map:
+                            selected_source = options_map[choice]
+                            if selected_source == "custom":
+                                console.print("\nEnter device index (e.g. 2, 3) or file/stream path (e.g. video.mp4, rtsp://...):")
+                                custom_val = input("custom source> ").strip()
+                                if custom_val:
+                                    self.cli.config.camera_source = custom_val
+                                    self.cli.config_manager.save()
+                                    console.print(f"[bold green]✓ Saved custom camera source: {custom_val}[/bold green]")
+                            else:
+                                self.cli.config.camera_source = selected_source
+                                self.cli.config_manager.save()
+                                console.print(f"[bold green]✓ Switched active camera to Device {selected_source}[/bold green]")
+                        elif choice == "":
+                            console.print("[dim]Kept current camera selection.[/dim]")
+                        else:
+                            console.print(f"[yellow]Invalid selection '{choice}'. Kept current camera.[/yellow]")
+                    except Exception:
+                        pass
+                    self.pause_for_user()
 
                 elif action == "camera_preview_toggle":
                     new_preview = not getattr(self.cli.config, "camera_show_preview", False)
                     self.cli.config.camera_show_preview = new_preview
                     self.cli.config_manager.save()
-
-                elif action == "camera_browser":
-                    os.system("cls" if os.name == "nt" else "clear")
-                    if not self.cli.client.is_configured():
-                        console.print("[bold red]Server URL is not configured. Connect first![/bold red]")
-                    else:
-                        url = self.cli.client.base_url
-                        console.print(f"[cyan]Opening OptiCore Live Vision web camera in your default browser:[/cyan]\n[bold green]{url}[/bold green]\n")
-                        try:
-                            webbrowser.open(url)
-                            console.print("[green]Browser launched! Select camera and tap 'Start camera' to begin streaming.[/green]")
-                        except Exception as e:
-                            console.print(f"[yellow]Could not launch browser automatically: {e}[/yellow]")
-                            console.print(f"Please open this URL manually in Chrome/Safari/Edge: {url}")
-                    self.pause_for_user()
 
                 elif action == "camera_stream_new":
                     os.system("cls" if os.name == "nt" else "clear")
@@ -570,25 +623,8 @@ class InteractiveMenu:
                         if ok:
                             console.print(f"[bold green]✓ {msg}[/bold green]")
                             console.print("[dim]The camera is now capturing and streaming frames to the server in that dedicated window.[/dim]")
-                            console.print("[dim]You can now launch the alert monitor in another window or view results below![/dim]")
                         else:
                             console.print(f"[bold yellow]! {msg}[/bold yellow]")
-                    self.pause_for_user()
-
-                elif action == "camera_stream_here":
-                    os.system("cls" if os.name == "nt" else "clear")
-                    if not self.cli.client.is_configured():
-                        console.print("[bold red]Cannot stream camera: Server URL is not configured. Connect first![/bold red]")
-                    else:
-                        from opticore_cli.camera import run_camera_stream_sync
-                        run_camera_stream_sync(
-                            server_url=self.cli.client.base_url,
-                            camera_source=self.cli.config.camera_source,
-                            width=self.cli.config.camera_width,
-                            target_fps=self.cli.config.camera_fps,
-                            quality=self.cli.config.camera_quality,
-                            show_window=self.cli.config.camera_show_preview,
-                        )
                     self.pause_for_user()
 
                 elif action == "test_voice":

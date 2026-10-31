@@ -27,10 +27,10 @@ def test_menu_items_structure(test_menu):
 
     ids = [item["id"] for item in items]
     assert "connect" in ids
+    assert "camera_toggle" in ids
     assert "camera_stream_new" in ids
     assert "camera_source_toggle" in ids
     assert "camera_preview_toggle" in ids
-    assert "camera_browser" in ids
     assert "monitor_new" in ids
     assert "voice_toggle" in ids
     assert "voice_verb" in ids

@@ -2,6 +2,7 @@
 
 Captures frames from a local or remote webcam, Raspberry Pi camera, or video file,
 and streams compressed JPEG frames over WebSocket to the OptiCore Vision Server (/ws/video).
+Provides CameraStreamManager for clean background ON/OFF lifecycle management.
 """
 
 import argparse
@@ -10,8 +11,9 @@ import base64
 import json
 import os
 import sys
+import threading
 import time
-from typing import Optional, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 try:
     import cv2
@@ -43,6 +45,272 @@ def convert_to_ws_url(server_url: str) -> str:
     return clean
 
 
+class SuppressStderr:
+    """Temporarily suppresses OS-level stderr (fd 2) to silence C++ OpenCV logs."""
+
+    def __enter__(self):
+        try:
+            self.null_fd = os.open(os.devnull, os.O_RDWR)
+            self.save_stderr = os.dup(2)
+            os.dup2(self.null_fd, 2)
+        except Exception:
+            self.save_stderr = None
+
+    def __exit__(self, *args):
+        if getattr(self, "save_stderr", None) is not None:
+            try:
+                os.dup2(self.save_stderr, 2)
+                os.close(self.save_stderr)
+                os.close(self.null_fd)
+            except Exception:
+                pass
+
+
+def detect_cameras(max_probe: int = 4) -> List[Dict[str, str]]:
+    """Probes system for available video capture devices cross-platform.
+    Returns list of dicts with keys: 'index', 'resolution', 'label'.
+    """
+    if cv2 is None:
+        return []
+
+    found_cameras = []
+    with SuppressStderr():
+        for idx in range(max_probe):
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    label = f"Camera {idx}"
+
+                    # Linux device name check
+                    sys_name_path = f"/sys/class/video4linux/video{idx}/name"
+                    if os.path.exists(sys_name_path):
+                        try:
+                            with open(sys_name_path, "r", encoding="utf-8") as f:
+                                dev_name = f.read().strip()
+                                if dev_name:
+                                    label += f" ({dev_name})"
+                        except Exception:
+                            pass
+                    else:
+                        if idx == 0:
+                            label += " (Default / Integrated)"
+                        elif idx == 1:
+                            label += " (External / USB)"
+                        else:
+                            label += " (Auxiliary)"
+
+                    found_cameras.append({
+                        "index": str(idx),
+                        "resolution": f"{w}x{h}",
+                        "label": label,
+                    })
+                cap.release()
+
+    return found_cameras
+
+
+class CameraStreamManager:
+    """Manages background camera streaming lifecycle with simple ON/OFF toggling."""
+
+    def __init__(self, config_manager: ConfigManager):
+        self.config_manager = config_manager
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._started_event = threading.Event()
+        self._is_active = False
+        self._last_error = ""
+        self.frames_sent = 0
+        self.fps_estimate = 0.0
+        self.latency_ms = 0.0
+        self.active_source = "0"
+
+    @property
+    def is_active(self) -> bool:
+        return self._is_active and self._thread is not None and self._thread.is_alive()
+
+    def start(self, server_url: str = "") -> Tuple[bool, str]:
+        """Starts streaming the camera in the background."""
+        if self.is_active:
+            return True, "Camera stream is already active."
+
+        cfg = self.config_manager.config
+        url = server_url or cfg.server_url
+        if not url:
+            return False, "Server URL is not configured. Connect to server first."
+
+        self._stop_event.clear()
+        self._started_event.clear()
+        self._last_error = ""
+        self.frames_sent = 0
+        self.active_source = str(cfg.camera_source)
+
+        def _worker():
+            self._is_active = True
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    self._run_stream(
+                        server_url=url,
+                        camera_source=cfg.camera_source,
+                        width=cfg.camera_width,
+                        target_fps=cfg.camera_fps,
+                        quality=cfg.camera_quality,
+                        show_window=cfg.camera_show_preview,
+                    )
+                )
+            except Exception as e:
+                self._last_error = str(e)
+            finally:
+                self._is_active = False
+                loop.close()
+
+        self._thread = threading.Thread(target=_worker, name="OptiCore-CameraStreamer", daemon=True)
+        self._thread.start()
+
+        # Wait briefly for worker to initialize or report immediate failure
+        self._started_event.wait(timeout=1.5)
+        if self._last_error:
+            self._is_active = False
+            return False, self._last_error
+
+        return True, f"Camera Device {self.active_source} is now streaming to {url}."
+
+    def stop(self) -> Tuple[bool, str]:
+        """Stops the active background camera stream."""
+        if not self.is_active:
+            return True, "Camera stream is not active."
+
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.5)
+
+        self._is_active = False
+        return True, "Camera stream stopped."
+
+    def toggle(self, server_url: str = "") -> Tuple[bool, str]:
+        """Toggles camera stream ON or OFF."""
+        if self.is_active:
+            return self.stop()
+        else:
+            return self.start(server_url)
+
+    def get_status_dict(self) -> dict:
+        return {
+            "active": self.is_active,
+            "source": self.active_source,
+            "frames_sent": self.frames_sent,
+            "fps": round(self.fps_estimate, 1),
+            "latency_ms": round(self.latency_ms, 1),
+            "last_error": self._last_error,
+        }
+
+    async def _run_stream(self, server_url, camera_source, width, target_fps, quality, show_window):
+        if cv2 is None or websockets is None:
+            self._last_error = "OpenCV or websockets not installed."
+            self._started_event.set()
+            return
+
+        ws_url = convert_to_ws_url(server_url)
+        try:
+            source = int(camera_source)
+        except ValueError:
+            source = str(camera_source)
+
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            self._last_error = f"Could not open camera device '{source}'."
+            self._started_event.set()
+            return
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(width * 0.75))
+        frame_interval = 1.0 / max(1.0, target_fps)
+
+        try:
+            async with websockets.connect(
+                ws_url,
+                max_size=8 * 1024 * 1024,
+                ping_interval=20,
+                ping_timeout=20,
+            ) as ws:
+                self._started_event.set()
+                start_time = time.time()
+
+                while cap.isOpened() and not self._stop_event.is_set():
+                    loop_start = time.perf_counter()
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    h, w = frame.shape[:2]
+                    if w > width:
+                        new_h = int(h * width / w)
+                        frame = cv2.resize(frame, (width, new_h), interpolation=cv2.INTER_AREA)
+
+                    ok, encimg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+                    if not ok:
+                        continue
+
+                    await ws.send(encimg.tobytes())
+                    self.frames_sent += 1
+
+                    raw_resp = await ws.recv()
+                    data = {}
+                    try:
+                        data = json.loads(raw_resp)
+                        if data.get("type") == "error":
+                            if data.get("code") == "producer_busy":
+                                self._last_error = (
+                                    "Another camera stream is active on the server. "
+                                    "Please close any browser tab streaming to the server first."
+                                )
+                            else:
+                                self._last_error = data.get("message", "Server rejected stream.")
+                            break
+                        self.latency_ms = data.get("inference_ms", 0.0)
+                    except Exception:
+                        pass
+
+                    elapsed = time.time() - start_time
+                    self.fps_estimate = self.frames_sent / max(0.1, elapsed)
+
+                    # Optional local GUI window
+                    if show_window and "image" in data and data["image"]:
+                        try:
+                            img_bytes = base64.b64decode(data["image"])
+                            annotated = cv2.imdecode(np.frombuffer(img_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+                            if annotated is not None:
+                                cv2.imshow("OptiCore Live Stream (Server Annotated)", annotated)
+                                if cv2.waitKey(1) & 0xFF == ord("q"):
+                                    break
+                        except Exception:
+                            pass
+
+                    elapsed_frame = time.perf_counter() - loop_start
+                    sleep_time = frame_interval - elapsed_frame
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+
+        except websockets.exceptions.InvalidStatusCode as e:
+            self._last_error = f"Connection refused by server (HTTP {e.status_code})."
+            self._started_event.set()
+        except Exception as e:
+            self._last_error = f"Camera streaming error: {e}"
+            self._started_event.set()
+        finally:
+            cap.release()
+            if show_window and cv2 is not None:
+                try:
+                    cv2.destroyAllWindows()
+                except Exception:
+                    pass
+            self._is_active = False
+
+
 async def stream_camera(
     server_url: str,
     camera_source: Union[int, str] = "0",
@@ -50,8 +318,9 @@ async def stream_camera(
     target_fps: float = 15.0,
     quality: int = 65,
     show_window: bool = False,
+    stop_event: Optional[threading.Event] = None,
 ) -> int:
-    """Capture frames and stream over WebSocket to OptiCore server."""
+    """Capture frames and stream over WebSocket to OptiCore server (foreground CLI mode)."""
     if cv2 is None or websockets is None:
         print("[ERROR] Missing required packages for camera streaming.")
         print("Please install them: pip install opencv-python websockets")
@@ -59,7 +328,6 @@ async def stream_camera(
 
     ws_url = convert_to_ws_url(server_url)
 
-    # Determine camera source: integer index or file/stream URL
     try:
         source: Union[int, str] = int(camera_source)
     except ValueError:
@@ -72,7 +340,6 @@ async def stream_camera(
         print("Tip: If using a USB webcam, check index (0, 1). On Raspberry Pi, verify camera permissions.")
         return 1
 
-    # Request desired capture resolution
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(width * 0.75))
 
@@ -93,7 +360,7 @@ async def stream_camera(
         ) as ws:
             print("[+] Connected to OptiCore server! Live camera feed is active.")
 
-            while cap.isOpened():
+            while cap.isOpened() and (stop_event is None or not stop_event.is_set()):
                 loop_start = time.perf_counter()
 
                 ret, frame = cap.read()
@@ -101,32 +368,25 @@ async def stream_camera(
                     print("\n[!] Camera feed ended or frame could not be read.")
                     break
 
-                # Resize if wider than requested width
                 h, w = frame.shape[:2]
                 if w > width:
                     new_h = int(h * width / w)
                     frame = cv2.resize(frame, (width, new_h), interpolation=cv2.INTER_AREA)
 
-                # Encode frame to JPEG binary buffer
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
                 ok, encimg = cv2.imencode(".jpg", frame, encode_param)
                 if not ok:
                     continue
 
-                payload = encimg.tobytes()
-
-                # Send binary JPEG payload to server
-                await ws.send(payload)
+                await ws.send(encimg.tobytes())
                 frames_sent += 1
 
-                # Receive response JSON containing detections and annotated image
                 raw_response = await ws.recv()
                 try:
                     data = json.loads(raw_response)
                 except Exception:
                     data = {}
 
-                # Check if server returned busy error
                 if data.get("type") == "error":
                     print(f"\n[SERVER ERROR] {data.get('code')}: {data.get('message')}")
                     break
@@ -135,7 +395,6 @@ async def stream_camera(
                 detections = data.get("detections", [])
                 alerts = data.get("alerts", [])
 
-                # Format terminal status line
                 det_summary = ", ".join(f"{d.get('name')} ({d.get('confidence', 0)*100:.0f}%)" for d in detections[:3])
                 if len(detections) > 3:
                     det_summary += f" +{len(detections)-3} more"
@@ -143,7 +402,6 @@ async def stream_camera(
                     det_summary = "None"
 
                 alert_badge = f" [!] {alerts[0].get('message')}" if alerts else ""
-
                 elapsed = time.time() - start_time
                 fps = frames_sent / max(0.1, elapsed)
 
@@ -152,7 +410,6 @@ async def stream_camera(
                 )
                 sys.stdout.flush()
 
-                # Optional local GUI preview window
                 if show_window and "image" in data and data["image"]:
                     try:
                         img_bytes = base64.b64decode(data["image"])
@@ -165,7 +422,6 @@ async def stream_camera(
                     except Exception:
                         pass
 
-                # Maintain target FPS
                 elapsed_frame = time.perf_counter() - loop_start
                 sleep_time = frame_interval - elapsed_frame
                 if sleep_time > 0:
@@ -256,8 +512,24 @@ def main(argv: Optional[list] = None) -> None:
         default=config.camera_show_preview,
         help="Display local preview window with server-annotated detections.",
     )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Detect and list all available video input devices.",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.list:
+        print("[*] Probing system for connected camera devices...")
+        cams = detect_cameras(max_probe=6)
+        if not cams:
+            print("No camera devices detected.")
+        else:
+            print(f"Found {len(cams)} camera device(s):")
+            for c in cams:
+                print(f"  - Device [{c['index']}]: {c['label']} (Max Resolution: {c['resolution']})")
+        sys.exit(0)
 
     if not args.server:
         print("[ERROR] No server URL provided.")
