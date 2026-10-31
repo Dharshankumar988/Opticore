@@ -13,21 +13,30 @@ Connect over the internet to your running OptiCore vision server (hosted on Kagg
 3. [Installation](#installation)
    - [Windows 10/11 Installation](#windows-1011-installation)
    - [Raspberry Pi OS (ARM64) / Debian Linux Installation](#raspberry-pi-os-arm64--debian-linux-installation)
-4. [Connecting to the OptiCore Server](#connecting-to-the-opticore-server)
+4. [Raspberry Pi — Complete Setup Guide](#raspberry-pi--complete-setup-guide)
+   - [System Packages](#1-system-packages)
+   - [Camera Setup (USB & Pi Camera)](#2-camera-setup)
+   - [Audio Output Setup](#3-audio-output-setup)
+   - [Install and Run OptiCore CLI](#4-install-and-run-opticore-cli)
+   - [Stream Camera from Pi (Headless)](#5-stream-camera-from-pi-to-server-headless)
+   - [Auto-Start on Boot (systemd)](#6-auto-start-opticore-on-boot-systemd)
+   - [Headless Operation via SSH](#7-headless-operation-via-ssh)
+   - [Performance Tips](#8-performance-tips-for-raspberry-pi)
+5. [Connecting to the OptiCore Server](#connecting-to-the-opticore-server)
    - [Starting the Vision Server (Kaggle / Remote GPU)](#starting-the-vision-server-kaggle--remote-gpu)
    - [Obtaining Your Public ngrok URL](#obtaining-your-public-ngrok-url)
-5. [Quick Start](#quick-start)
-6. [Interactive Command Center Shell](#interactive-command-center-shell)
-7. [Command Reference & Examples](#command-reference--examples)
-8. [Live Detection Logs Stream](#live-detection-logs-stream)
-9. [Voice Alert Subsystem](#voice-alert-subsystem)
+6. [Quick Start](#quick-start)
+7. [Interactive Command Center Shell](#interactive-command-center-shell)
+8. [Command Reference & Examples](#command-reference--examples)
+9. [Live Detection Logs Stream](#live-detection-logs-stream)
+10. [Voice Alert Subsystem](#voice-alert-subsystem)
    - [How Voice Works (Client vs Server)](#how-voice-works-client-vs-server)
    - [Voice Controls & Verbosity](#voice-controls--verbosity)
    - [Audio Reliability & Fallback](#audio-reliability--fallback)
-10. [Configuration & Environment Variables](#configuration--environment-variables)
-11. [Local Offline Testing & Mock Server](#local-offline-testing--mock-server)
-12. [Troubleshooting & FAQs](#troubleshooting--faqs)
-13. [Verification & Architecture Conformance](#verification--architecture-conformance)
+11. [Configuration & Environment Variables](#configuration--environment-variables)
+12. [Local Offline Testing & Mock Server](#local-offline-testing--mock-server)
+13. [Troubleshooting & FAQs](#troubleshooting--faqs)
+14. [Verification & Architecture Conformance](#verification--architecture-conformance)
 
 ---
 
@@ -126,6 +135,208 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 ```
+
+---
+
+## Raspberry Pi — Complete Setup Guide
+
+This section covers everything needed to run OptiCore on a Raspberry Pi (3B+, 4, 5, or Zero 2 W) running **Raspberry Pi OS Bookworm (64-bit)**.
+
+### 1. System Packages
+
+```bash
+# Update and install all required system packages in one command
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+  git python3-pip python3-venv \
+  espeak-ng libespeak-ng1 \
+  libgl1 libglib2.0-0 \
+  v4l-utils \
+  alsa-utils pulseaudio
+```
+
+### 2. Camera Setup
+
+#### USB Webcam (Plug and Play)
+```bash
+# Verify the USB webcam is detected
+lsusb
+v4l2-ctl --list-devices
+
+# Test capture (press Ctrl+C to stop)
+v4l2-ctl --device=/dev/video0 --stream-mmap --stream-count=5
+```
+
+#### Pi Camera Module (CSI Ribbon Cable)
+```bash
+# Enable the camera interface
+sudo raspi-config
+# Navigate to: Interface Options → Camera → Enable → Reboot
+
+# Verify Pi Camera is detected
+libcamera-hello --list-cameras
+
+# Install libcamera Python bindings (if using Pi Camera with OpenCV)
+sudo apt install -y python3-libcamera python3-picamera2
+
+# Quick test (shows preview for 3 seconds)
+libcamera-hello -t 3000
+```
+
+> [!NOTE]
+> If using a Pi Camera Module, set `camera_source` to `0` in OptiCore config. OpenCV's `cv2.VideoCapture(0)` works with both USB and Pi Camera on Bookworm.
+
+### 3. Audio Output Setup
+
+```bash
+# List available audio output devices
+aplay -l
+
+# Test speaker output (plays a sine wave for 2 seconds)
+speaker-test -t sine -f 440 -l 1 -P 2
+
+# Select audio output device (HDMI, 3.5mm jack, or USB DAC)
+sudo raspi-config
+# Navigate to: System Options → Audio → Choose output
+
+# If using Bluetooth speaker, pair it first:
+bluetoothctl
+# > scan on
+# > pair <MAC_ADDRESS>
+# > connect <MAC_ADDRESS>
+# > trust <MAC_ADDRESS>
+
+# Test espeak-ng voice output
+espeak-ng "OptiCore is ready"
+
+# Adjust system volume (0-100%)
+amixer set Master 85%
+```
+
+### 4. Install and Run OptiCore CLI
+
+```bash
+# Clone, create venv, and install
+git clone https://github.com/Dharshankumar988/Opticore.git
+cd Opticore
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+
+# Connect to your running server
+opticore-cli connect https://your-ngrok-url.ngrok-free.app
+
+# Start camera streaming + voice alerts
+opticore-cli camera on
+opticore-cli voice on
+
+# Or launch the full interactive menu
+opticore-cli
+```
+
+### 5. Stream Camera from Pi to Server (Headless)
+
+```bash
+# Stream USB webcam to remote OptiCore server (no monitor needed)
+python stream_camera.py \
+  --server https://your-ngrok-url.ngrok-free.app \
+  --camera 0 \
+  --fps 15
+
+# Stream with lower resolution for Pi Zero 2 W (saves bandwidth)
+python stream_camera.py \
+  --server https://your-ngrok-url.ngrok-free.app \
+  --camera 0 \
+  --fps 10 \
+  --width 480
+```
+
+### 6. Auto-Start OptiCore on Boot (systemd)
+
+Create a systemd service so OptiCore starts automatically when the Pi boots:
+
+```bash
+sudo nano /etc/systemd/system/opticore.service
+```
+
+Paste the following:
+
+```ini
+[Unit]
+Description=OptiCore Assistive Vision CLI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Opticore
+Environment=OPTICORE_SERVER_URL=https://your-ngrok-url.ngrok-free.app
+Environment=OPTICORE_VOICE_ENABLED=true
+Environment=OPTICORE_VOICE_VERBOSITY=priority
+ExecStart=/home/pi/Opticore/venv/bin/python stream_camera.py --server https://your-ngrok-url.ngrok-free.app --camera 0 --fps 15
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable opticore.service
+sudo systemctl start opticore.service
+
+# Check status
+sudo systemctl status opticore.service
+
+# View live logs
+journalctl -u opticore.service -f
+```
+
+### 7. Headless Operation via SSH
+
+```bash
+# SSH into your Pi from another computer
+ssh pi@raspberrypi.local
+
+# Activate the venv
+cd Opticore && source venv/bin/activate
+
+# Run OptiCore in a tmux session (persists after SSH disconnect)
+sudo apt install -y tmux
+tmux new -s opticore
+
+# Inside tmux: start streaming
+python stream_camera.py --server https://your-ngrok-url.ngrok-free.app --camera 0 --fps 15
+
+# Detach from tmux: press Ctrl+B then D
+# Reattach later: tmux attach -t opticore
+```
+
+### 8. Performance Tips for Raspberry Pi
+
+| Setting | Pi 4 / Pi 5 | Pi Zero 2 W / Pi 3B+ |
+|---|---|---|
+| `--fps` | `15` | `8–10` |
+| `--width` | `640` | `480` |
+| `JPEG quality` | `65` | `50` |
+| Voice engine | `espeak-ng` | `espeak-ng` |
+
+```bash
+# Monitor Pi temperature and throttling during operation
+vcgencmd measure_temp
+vcgencmd get_throttled
+
+# If thermal throttling occurs, use a heatsink or fan case
+```
+
+> [!TIP]
+> For best performance on Pi Zero 2 W, lower the FPS to 8–10 and frame width to 480. The server does the heavy YOLO inference on GPU, so the Pi only needs to capture and send frames.
 
 ---
 
