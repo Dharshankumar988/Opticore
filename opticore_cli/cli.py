@@ -214,7 +214,8 @@ class OptiCoreCLI:
 
     def handle_camera(self, args: List[str]) -> None:
         """Controls background camera streaming or lists hardware cameras."""
-        action = args[0].lower() if args else "status"
+        raw = args[0].lower() if args else "status"
+        action = raw.lstrip("-")
 
         if action in {"on", "start"}:
             if not self.client.is_configured():
@@ -298,7 +299,8 @@ class OptiCoreCLI:
             console.print(render_voice_status(self.voice.get_status_dict()))
             return
 
-        action = args[0].lower()
+        raw = args[0].lower()
+        action = raw.lstrip("-")
         if action in {"on", "enable", "start"}:
             self.voice.set_enabled(True)
             self.config.voice_enabled = True
@@ -576,11 +578,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # camera
     p_cam = subparsers.add_parser("camera", parents=[common_parent], help="Control background camera stream (on/off/status/list)")
-    p_cam.add_argument("action", nargs="?", default="status", choices=["on", "off", "toggle", "status", "list"], help="Camera action")
+    p_cam.add_argument("--on", "-on", action="store_true", help="Turn camera stream ON")
+    p_cam.add_argument("--off", "-off", action="store_true", help="Turn camera stream OFF")
+    p_cam.add_argument("action", nargs="?", default=None, choices=["on", "off", "toggle", "status", "list", None], help="Camera action")
 
     # voice
     p_voice = subparsers.add_parser("voice", parents=[common_parent], help="Control or test voice alerts")
-    p_voice.add_argument("action", nargs="?", default="status", choices=["on", "off", "status", "test"], help="Voice action")
+    p_voice.add_argument("--on", "-on", action="store_true", help="Turn voice alerts ON")
+    p_voice.add_argument("--off", "-off", action="store_true", help="Turn voice alerts OFF")
+    p_voice.add_argument("action", nargs="?", default=None, choices=["on", "off", "status", "test", None], help="Voice action")
 
     # config
     p_cfg = subparsers.add_parser("config", parents=[common_parent], help="View or modify configuration")
@@ -641,7 +647,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         cli.handle_monitor(mon_args)
         cli.shutdown()
     elif args.command == "camera":
-        cli.handle_camera([args.action])
+        cam_act = "on" if (getattr(args, "on", False) or args.action == "on") else ("off" if (getattr(args, "off", False) or args.action == "off") else (args.action or "status"))
+        cli.handle_camera([cam_act])
         cli.shutdown()
     elif args.command == "stream":
         stream_args = []
@@ -654,7 +661,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         cli.handle_camera(["stream"] + stream_args)
         cli.shutdown()
     elif args.command == "voice":
-        cli.handle_voice([args.action])
+        voice_act = "on" if (getattr(args, "on", False) or args.action == "on") else ("off" if (getattr(args, "off", False) or args.action == "off") else (args.action or "status"))
+        cli.handle_voice([voice_act])
         cli.shutdown()
     elif args.command == "config":
         cli.handle_config([args.action])

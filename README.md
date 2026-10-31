@@ -253,19 +253,30 @@ python stream_camera.py \
   --width 480
 ```
 
-### 6. Auto-Start OptiCore on Boot (systemd)
+### 6. Auto-Start OptiCore on Boot (systemd — One-Time Setup)
 
-Create a systemd service so OptiCore starts automatically when the Pi boots:
+You can set up OptiCore once so that whenever the Raspberry Pi powers on, it automatically initializes the camera, connects to the server, and begins streaming frames and voice alerts immediately. 
 
+Because OptiCore uses persistent configuration (`~/.opticore/config.json`), you configure the server URL and camera once via the CLI, and the systemd service reads those settings automatically on boot.
+
+#### Step 1: Configure Your URL and Camera Once
+```bash
+# Save your ngrok URL and default camera (Device 0):
+opticore-cli connect https://your-ngrok-url.ngrok-free.app
+opticore-cli config set camera_source 0
+opticore-cli config set voice_enabled true
+```
+
+#### Step 2: Create the systemd Service File
 ```bash
 sudo nano /etc/systemd/system/opticore.service
 ```
 
-Paste the following:
+Paste the following service definition:
 
 ```ini
 [Unit]
-Description=OptiCore Assistive Vision CLI
+Description=OptiCore Real-Time Assistive Vision & Camera Streamer
 After=network-online.target
 Wants=network-online.target
 
@@ -273,29 +284,39 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/Opticore
-Environment=OPTICORE_SERVER_URL=https://your-ngrok-url.ngrok-free.app
-Environment=OPTICORE_VOICE_ENABLED=true
-Environment=OPTICORE_VOICE_VERBOSITY=priority
-ExecStart=/home/pi/Opticore/venv/bin/python stream_camera.py --server https://your-ngrok-url.ngrok-free.app --camera 0 --fps 15
-Restart=on-failure
-RestartSec=10
+# Automatically reads persistent settings from ~/.opticore/config.json
+ExecStart=/home/pi/Opticore/venv/bin/python stream_camera.py
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Then enable and start:
-
+#### Step 3: Enable and Start the Service
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable opticore.service
 sudo systemctl start opticore.service
 
-# Check status
+# Check service status:
 sudo systemctl status opticore.service
 
-# View live logs
+# View live streaming logs:
 journalctl -u opticore.service -f
+```
+
+#### Changing Settings Later (No Need to Re-edit systemd!)
+Whenever your ngrok URL changes or you switch cameras, simply update the setting via the CLI and restart the service:
+```bash
+# Update the server URL:
+opticore-cli connect https://new-url.ngrok-free.app
+
+# Or switch camera hardware device:
+opticore-cli config set camera_source 1
+
+# Restart service to apply:
+sudo systemctl restart opticore.service
 ```
 
 ### 7. Headless Operation via SSH
@@ -566,8 +587,12 @@ opticore-cli monitor --voice --verbosity priority
 
 #### 4. Voice Alert Management
 ```bash
-# Enable or disable client-side voice alerts:
-opticore-cli voice on
+# Enable or disable client-side voice alerts (supports flags or positional words):
+opticore-cli voice -on         # PowerShell / single-dash style
+opticore-cli voice -off
+opticore-cli voice --on        # GNU style
+opticore-cli voice --off
+opticore-cli voice on          # Simple word style
 opticore-cli voice off
 
 # Inspect TTS audio backend, volume, and deduplication queue:

@@ -113,3 +113,21 @@ def test_arg_parser_subcommands():
     args = parser.parse_args(["camera", "on"])
     assert args.command == "camera"
     assert args.action == "on"
+
+    args = parser.parse_args(["camera", "-off"])
+    assert args.command == "camera"
+    assert args.off is True
+
+    # Voice on/off/status with dash flags
+    args = parser.parse_args(["voice", "-on"])
+    assert args.command == "voice"
+    assert args.on is True
+
+    args = parser.parse_args(["voice", "--off"])
+    assert args.command == "voice"
+    assert args.off is True
+
+    args = parser.parse_args(["voice", "off"])
+    assert args.command == "voice"
+    assert args.action == "off"
+
