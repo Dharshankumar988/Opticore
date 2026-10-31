@@ -168,12 +168,36 @@ class OptiCoreCLI:
             return
 
         poll_interval = self.config.poll_interval
+        new_window = False
+
         if args:
-            try:
-                val = args[1] if args[0] in {"--poll", "-p"} and len(args) > 1 else args[0]
-                poll_interval = float(val)
-            except ValueError:
-                pass
+            if "--new-window" in args or "-w" in args:
+                new_window = True
+            for idx, a in enumerate(args):
+                if a in {"--poll", "-p"} and idx + 1 < len(args):
+                    try:
+                        poll_interval = float(args[idx + 1])
+                    except ValueError:
+                        pass
+                elif a.replace(".", "", 1).isdigit():
+                    try:
+                        poll_interval = float(a)
+                    except ValueError:
+                        pass
+
+        if new_window:
+            from opticore_cli.menu import launch_in_new_window
+            ok, msg = launch_in_new_window(
+                server_url=self.client.base_url,
+                poll=poll_interval,
+                voice=self.voice.enabled,
+                verbosity=self.voice.verbosity,
+            )
+            if ok:
+                console.print(f"[bold green]✓ {msg}[/bold green]")
+            else:
+                console.print(f"[bold yellow]! {msg}[/bold yellow]")
+            return
 
         monitor = LiveEventMonitor(
             client=self.client,
@@ -348,6 +372,10 @@ class OptiCoreCLI:
         elif cmd == "metrics":
             self.handle_metrics()
 
+        elif cmd in {"menu", "toggle"}:
+            from opticore_cli.menu import InteractiveMenu
+            InteractiveMenu(self).run()
+
         elif cmd in {"events", "alerts"}:
             self.handle_events(args)
 
@@ -420,8 +448,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Command to execute directly")
 
-    # interactive (default if no subcommand)
-    subparsers.add_parser("interactive", parents=[common_parent], help="Start interactive shell")
+    # menu (interactive arrow-key toggle menu)
+    subparsers.add_parser("menu", parents=[common_parent], help="Start interactive arrow-key toggle menu")
+
+    # interactive (classic prompt mode)
+    subparsers.add_parser("interactive", parents=[common_parent], help="Start classic command prompt")
 
     # connect
     p_connect = subparsers.add_parser("connect", parents=[common_parent], help="Test and set server connection")
@@ -443,6 +474,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # monitor
     p_mon = subparsers.add_parser("monitor", parents=[common_parent], help="Stream live detection logs")
     p_mon.add_argument("--poll", "-p", type=float, default=1.0, help="Polling interval in seconds")
+    p_mon.add_argument("--new-window", "-w", action="store_true", help="Open stream in a dedicated new shell window")
 
     # voice
     p_voice = subparsers.add_parser("voice", parents=[common_parent], help="Control or test voice alerts")
@@ -479,8 +511,11 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     cli = OptiCoreCLI(config_manager=config_manager)
 
-    # Dispatch subcommand or launch interactive mode
-    if args.command is None or args.command == "interactive":
+    # Dispatch subcommand or launch interactive menu by default
+    if args.command is None or args.command == "menu":
+        from opticore_cli.menu import InteractiveMenu
+        InteractiveMenu(cli).run()
+    elif args.command == "interactive" or args.command == "prompt":
         cli.run_interactive()
     elif args.command == "connect":
         cli.handle_connect([args.server_url] if args.server_url else [])
@@ -498,7 +533,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         cli.handle_events(["--limit", str(args.limit)])
         cli.shutdown()
     elif args.command == "monitor":
-        cli.handle_monitor(["--poll", str(args.poll)])
+        mon_args = ["--poll", str(args.poll)]
+        if getattr(args, "new_window", False):
+            mon_args.append("--new-window")
+        cli.handle_monitor(mon_args)
         cli.shutdown()
     elif args.command == "voice":
         cli.handle_voice([args.action])

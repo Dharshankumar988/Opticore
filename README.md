@@ -79,11 +79,12 @@ The OptiCore system combines **YOLO object detection**, **ByteTrack multi-object
 
 ### Windows 10/11 Installation
 
-Open **PowerShell** or **Windows Terminal** (as a normal user, no administrator rights required):
+Open **PowerShell** or **Windows Terminal**:
 
 ```powershell
-# 1. Clone or navigate to the OptiCore directory
-cd "c:\IMP PROJECTS\Opticore"
+# 1. Clone the repository from GitHub
+git clone https://github.com/Dharshankumar988/Opticore.git
+cd Opticore
 
 # 2. (Recommended) Create and activate a virtual environment
 python -m venv venv
@@ -109,10 +110,11 @@ Open a terminal on your Raspberry Pi:
 ```bash
 # 1. Update system packages and install speech synthesizer packages
 # (Note: on Raspberry Pi OS Bookworm / Debian 12, espeak-ng is the modern standard package)
-sudo apt update && sudo apt install -y python3-pip python3-venv espeak-ng libespeak-ng1
+sudo apt update && sudo apt install -y git python3-pip python3-venv espeak-ng libespeak-ng1
 
-# 2. Navigate to the OptiCore project directory
-cd ~/Opticore
+# 2. Clone the repository from GitHub
+git clone https://github.com/Dharshankumar988/Opticore.git
+cd Opticore
 
 # 3. Create and activate a virtual environment
 # (Required by Raspberry Pi OS / PEP 668 externally-managed environment policy)
@@ -157,56 +159,55 @@ Keep the Kaggle notebook running while using the CLI Command Center.
 Launch the interactive Command Center:
 
 ```bash
-# Using the installed command:
 opticore-cli
-
-# Or directly through Python:
-python -m opticore_cli
 ```
 
-Inside the interactive shell:
+### Interactive Arrow-Key Toggle Menu (Default Mode)
+
+Launching `opticore-cli` opens the interactive toggle menu:
 
 ```
-[Disconnected | Voice:OFF] opticore> connect https://your-id.ngrok-free.app
-Connecting to https://your-id.ngrok-free.app...
-Connected successfully to OptiCore server! (42.1 ms roundtrip)
+  Status: [Connected: https://xxxx.ngrok-free.app (38.2 ms) | Voice: ON (Priority)]
 
-[https://your-id.ngrok-free.app | Voice:OFF] opticore> voice on
-Voice alerts ENABLED.
+  Use ↑/↓ arrows to navigate | [Enter] to select | [Space] to toggle | [q] to exit
 
-[https://your-id.ngrok-free.app | Voice:ON] opticore> monitor
+  ╭─────────────────────────────────────────────────────────────────────────────────────────────╮
+  │   1.  Connect to Server              Configure or test OptiCore server URL                  │
+  │ ▶ 2.  Launch Live Stream (New Window) Spawns dedicated shell window for live alerts  [POPUP] │
+  │   3.  Voice Alerts: [ ON ]           Toggle local text-to-speech alerts on or off  [TOGGLE] │
+  │   4.  Voice Verbosity: < PRIORITY >  Cycle: PRIORITY -> CRITICAL -> ALL            [TOGGLE] │
+  │   5.  Test Voice Output              Play test speech announcement                          │
+  │   6.  Server Status & GPU            View GPU hardware, device, and uptime                  │
+  │   7.  Server Health Check            Inference latency, model readiness, and FPS            │
+  │   8.  View Recent Priority Alerts    Display table of recent alerts from /events            │
+  │   9.  Performance Metrics            Processed frames, avg latency, and FPS EMA             │
+  │  10.  Configuration Settings         View and modify persistent CLI settings                │
+  │  11.  Switch to Command Prompt       Drop into classic prompt mode (opticore> )             │
+  │  12.  Exit Command Center            Safely exit OptiCore CLI Command Center                │
+  ╰─────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
----
-
-## Interactive Command Center Shell
-
-The interactive shell provides dynamic status updates right in your command prompt:
-
-```
-[https://your-ngrok-url.app | Voice:ON] opticore> 
-```
-
-- Left tag shows the active server URL (green when connected, yellow when disconnected).
-- Right tag shows voice alert status (`Voice:ON` or `Voice:OFF`).
-
-Type `help` at any time to view all available commands.
+- **Navigate:** Use `↑` and `↓` arrow keys.
+- **Toggle Voice Alerts:** Press `Space` or `Enter` on row 3 to immediately toggle Voice alerts `[ ON ]` / `[ OFF ]`.
+- **Toggle Verbosity:** Press `Space` or `Enter` on row 4 to cycle verbosity `< PRIORITY >` / `< CRITICAL >` / `< ALL >`.
+- **Dedicated Log Stream Window:** Selecting row 2 ("Launch Live Stream in New Window") spawns a **brand-new shell window** dedicated to streaming detection alerts, keeping your main menu open in parallel!
 
 ---
 
 ## Command Reference & Examples
 
-All commands can be run inside the interactive shell, or directly from the terminal.
+All commands can be run via the arrow menu, inside the interactive shell (`opticore-cli interactive`), or directly from the terminal.
 
 | Interactive Command | Direct CLI Command | Description |
 | :--- | :--- | :--- |
+| `menu` | `opticore-cli menu` | Launch the interactive arrow-key toggle menu |
 | `connect <url>` | `opticore-cli connect <url>` | Test connectivity, verify model, and save URL |
 | `disconnect` | — | Disconnect from current server session |
-| `health` | `opticore-cli health` | View server health, model status, device, and FPS |
 | `status` | `opticore-cli status` | View full server status, GPU hardware, and camera stream state |
+| `health` | `opticore-cli health` | View server health, model status, device, and FPS |
 | `metrics` | `opticore-cli metrics` | View inference latency, pipeline speed, and frame counts |
 | `events [N]` | `opticore-cli events --limit N` | Display the latest `N` detection alert events (1–100) |
-| `monitor` / `logs` | `opticore-cli monitor` | Enter real-time live event streaming mode (Ctrl+C to exit) |
+| `monitor [-w]` | `opticore-cli monitor [-w]` | Stream live alerts (`-w` / `--new-window` opens in separate shell) |
 | `voice [on\|off]` | `opticore-cli voice [on\|off]` | Enable or disable client-side voice alerts |
 | `voice status` | `opticore-cli voice status` | Show TTS audio engine, rate, volume, and queue depth |
 | `voice test` | `opticore-cli voice test` | Play a test speech announcement through your speakers |
