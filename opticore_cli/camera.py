@@ -45,6 +45,95 @@ def convert_to_ws_url(server_url: str) -> str:
     return clean
 
 
+OBSTACLE_GROUP = {"pole", "tree", "bench", "chair", "waste_container", "obstacle"}
+
+
+def synthesize_detection_alert(d: dict) -> dict:
+    raw_name = str(d.get("name", "")).strip().lower()
+    pos = str(d.get("position", "ahead")).strip().lower()
+    side = "on your left" if pos == "left" else "on your right" if pos == "right" else "ahead"
+    approaching = bool(d.get("approaching", False))
+    approach_dir = d.get("approach_direction")
+
+    if raw_name in OBSTACLE_GROUP:
+        display_name = "obstacle"
+        class_p = 6
+        prio = "P3"
+        msg = f"There is an obstacle {side}."
+    elif raw_name in {"car", "truck", "bus"}:
+        display_name = raw_name
+        class_p = 1
+        prio = "P1" if approaching else "P2"
+        if approaching and approach_dir:
+            msg = f"A {raw_name} is approaching {approach_dir}."
+        else:
+            msg = f"There is a {raw_name} {side}."
+    elif raw_name in {"motorcycle", "bicycle"}:
+        display_name = raw_name
+        class_p = 2
+        prio = "P1" if approaching else "P2"
+        if approaching and approach_dir:
+            msg = f"A {raw_name} is approaching {approach_dir}."
+        else:
+            msg = f"There is a {raw_name} {side}."
+    elif raw_name in {"pothole", "crack", "manhole"}:
+        display_name = raw_name
+        class_p = 2
+        prio = "P2"
+        msg = f"There is a {raw_name} {side}."
+    elif raw_name == "animal":
+        display_name = "animal"
+        class_p = 3
+        prio = "P2" if approaching else "P3"
+        if approaching and approach_dir:
+            msg = f"An animal is approaching {approach_dir}."
+        else:
+            msg = f"There is an animal {side}."
+    elif raw_name == "person":
+        display_name = "person"
+        class_p = 3
+        prio = "P2" if approaching else "P3"
+        if approaching and approach_dir:
+            msg = f"A person is approaching {approach_dir}."
+        else:
+            msg = f"There is a person {side}."
+    elif raw_name == "stairs":
+        display_name = "stairs"
+        class_p = 4
+        prio = "P3"
+        msg = f"There are stairs {side}."
+    elif raw_name == "door":
+        display_name = "door"
+        class_p = 4
+        prio = "P3"
+        msg = f"There is a door {side}."
+    elif raw_name in {"traffic_light", "traffic_sign"}:
+        display_name = raw_name.replace("_", " ")
+        class_p = 5
+        prio = "P3"
+        msg = f"There is a {display_name} {side}."
+    else:
+        display_name = raw_name.replace("_", " ")
+        class_p = 6
+        prio = "P4"
+        article = "an" if display_name[:1] in "aeiou" else "a"
+        msg = f"There is {article} {display_name} {side}."
+
+    return {
+        "timestamp": time.time(),
+        "track_id": d.get("id"),
+        "name": display_name,
+        "confidence": d.get("confidence", 0.0),
+        "class_priority": d.get("class_priority", class_p),
+        "position": pos,
+        "approaching": approaching,
+        "approach_direction": approach_dir,
+        "priority": d.get("priority", prio),
+        "risk_score": d.get("risk_score", 70 if class_p <= 2 else 40),
+        "message": msg,
+    }
+
+
 class SuppressStderr:
     """Temporarily suppresses OS-level stderr (fd 2) to silence C++ OpenCV logs."""
 
@@ -279,30 +368,22 @@ class CameraStreamManager:
                             from opticore_cli.models import DetectionEvent
                             alerts_to_speak = list(data.get("alerts", []))
                             if not alerts_to_speak and data.get("detections"):
-                                for d in data.get("detections", []):
-                                    d_name = str(d.get("name", "")).lower()
-                                    if d_name in {"person", "car", "bus", "truck", "motorcycle", "bicycle", "pothole", "stairs", "obstacle"}:
-                                        loc = "on your left" if d.get("position") == "left" else "on your right" if d.get("position") == "right" else "ahead"
-                                        if d.get("approaching"):
-                                            msg = f"A {d_name} appears to be approaching {d.get('approach_direction', 'head-on')}."
-                                        else:
-                                            msg = f"{d_name.capitalize()} detected {loc}."
-                                        synthesized_alert = {
-                                            "timestamp": time.time(),
-                                            "track_id": d.get("id"),
-                                            "name": d_name,
-                                            "confidence": d.get("confidence", 0.0),
-                                            "class_priority": d.get("class_priority", 2 if d_name in {"person", "motorcycle", "bicycle"} else 1),
-                                            "position": d.get("position", "ahead"),
-                                            "approaching": d.get("approaching", False),
-                                            "approach_direction": d.get("approach_direction"),
-                                            "priority": d.get("priority", "P2"),
-                                            "risk_score": d.get("risk_score", 50),
-                                            "message": msg,
-                                        }
-                                        alerts_to_speak.append(synthesized_alert)
+                                sorted_dets = sorted(
+                                    data.get("detections", []),
+                                    key=lambda x: (
+                                        1 if str(x.get("name")).lower() in {"car", "truck", "bus"} else
+                                        2 if str(x.get("name")).lower() in {"motorcycle", "bicycle", "pothole", "crack", "manhole"} else
+                                        3 if str(x.get("name")).lower() in {"person", "animal"} else
+                                        4 if str(x.get("name")).lower() in {"door", "stairs"} else
+                                        5 if str(x.get("name")).lower() in {"traffic_light", "traffic_sign"} else 6,
+                                        -float(x.get("confidence", 0.0))
+                                    )
+                                )
+                                if sorted_dets:
+                                    alerts_to_speak.append(synthesize_detection_alert(sorted_dets[0]))
 
-                            for alert_dict in alerts_to_speak:
+                            # Enqueue top alert to prevent overlapping/stuttering speech
+                            for alert_dict in alerts_to_speak[:1]:
                                 try:
                                     event = DetectionEvent.from_dict(alert_dict)
                                     self.voice_engine.enqueue_event(event)
@@ -437,30 +518,22 @@ async def stream_camera(
                     from opticore_cli.models import DetectionEvent
                     alerts_to_speak = list(alerts)
                     if not alerts_to_speak and detections:
-                        for d in detections:
-                            d_name = str(d.get("name", "")).lower()
-                            if d_name in {"person", "car", "bus", "truck", "motorcycle", "bicycle", "pothole", "stairs", "obstacle"}:
-                                loc = "on your left" if d.get("position") == "left" else "on your right" if d.get("position") == "right" else "ahead"
-                                if d.get("approaching"):
-                                    msg = f"A {d_name} appears to be approaching {d.get('approach_direction', 'head-on')}."
-                                else:
-                                    msg = f"{d_name.capitalize()} detected {loc}."
-                                synthesized_alert = {
-                                    "timestamp": time.time(),
-                                    "track_id": d.get("id"),
-                                    "name": d_name,
-                                    "confidence": d.get("confidence", 0.0),
-                                    "class_priority": d.get("class_priority", 2 if d_name in {"person", "motorcycle", "bicycle"} else 1),
-                                    "position": d.get("position", "ahead"),
-                                    "approaching": d.get("approaching", False),
-                                    "approach_direction": d.get("approach_direction"),
-                                    "priority": d.get("priority", "P2"),
-                                    "risk_score": d.get("risk_score", 50),
-                                    "message": msg,
-                                }
-                                alerts_to_speak.append(synthesized_alert)
+                        sorted_dets = sorted(
+                            detections,
+                            key=lambda x: (
+                                1 if str(x.get("name")).lower() in {"car", "truck", "bus"} else
+                                2 if str(x.get("name")).lower() in {"motorcycle", "bicycle", "pothole", "crack", "manhole"} else
+                                3 if str(x.get("name")).lower() in {"person", "animal"} else
+                                4 if str(x.get("name")).lower() in {"door", "stairs"} else
+                                5 if str(x.get("name")).lower() in {"traffic_light", "traffic_sign"} else 6,
+                                -float(x.get("confidence", 0.0))
+                            )
+                        )
+                        if sorted_dets:
+                            alerts_to_speak.append(synthesize_detection_alert(sorted_dets[0]))
 
-                    for a_dict in alerts_to_speak:
+                    # Enqueue top alert to prevent overlapping speech
+                    for a_dict in alerts_to_speak[:1]:
                         try:
                             ev = DetectionEvent.from_dict(a_dict)
                             voice_engine.enqueue_event(ev)

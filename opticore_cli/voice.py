@@ -128,6 +128,17 @@ class VoiceAlertEngine:
             except Exception:
                 pass
 
+        speaker = None
+        if platform.system().lower() == "windows":
+            try:
+                import win32com.client
+                speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                sapi_rate = max(-10, min(10, int((self.rate - 180) / 15)))
+                speaker.Rate = sapi_rate
+                speaker.Volume = int(self.volume * 100)
+            except Exception as e:
+                logger.debug("win32com SAPI init failed: %s", e)
+
         tts_instance = None
         if self._backend == "pyttsx3":
             try:
@@ -160,7 +171,7 @@ class VoiceAlertEngine:
                 continue
 
             try:
-                self._speak_message(message, tts_instance)
+                self._speak_message(message, tts_instance, speaker)
             except Exception as e:
                 logger.debug("Speech synthesis error: %s", e)
             finally:
@@ -172,8 +183,8 @@ class VoiceAlertEngine:
             except Exception:
                 pass
 
-    def _speak_message(self, message: str, tts_instance: Optional[object]) -> None:
-        """Speaks a message using the active backend."""
+    def _speak_message(self, message: str, tts_instance: Optional[object], speaker: Optional[object] = None) -> None:
+        """Speaks a message sequentially using the active backend."""
         if not self._engine_available:
             return
 
@@ -181,22 +192,16 @@ class VoiceAlertEngine:
         if not clean_message:
             return
 
-        # Windows native SAPI (fastest, supports sequential multi-line speech without hanging)
-        if self._backend == "sapi_native" or platform.system().lower() == "windows":
+        # Windows native SAPI (sequential, synchronous, zero-overlap)
+        if speaker is not None:
             try:
-                import win32com.client
-                import pythoncom
-                pythoncom.CoInitialize()
-                speaker = win32com.client.Dispatch("SAPI.SpVoice")
-                sapi_rate = max(-10, min(10, int((self.rate - 180) / 15)))
-                speaker.Rate = sapi_rate
-                speaker.Volume = int(self.volume * 100)
-                speaker.Speak(clean_message)
+                # Flag 0 = SVSFDefault (synchronous blocking speak so phrases never overlap)
+                speaker.Speak(clean_message, 0)
                 return
             except Exception as e:
-                logger.debug("win32com SAPI failed: %s. Falling back to PowerShell.", e)
+                logger.debug("win32com SAPI speak failed: %s. Falling back to PowerShell.", e)
 
-            # Fallback: PowerShell SAPI
+        if platform.system().lower() == "windows":
             try:
                 escaped = clean_message.replace("'", "''")
                 cmd = [
@@ -266,8 +271,11 @@ class VoiceAlertEngine:
         if v == "all":
             return True
 
-        # Matches server CLASS_PRIORITY rankings (P1 / P2)
-        priority_classes = {"car", "bus", "truck", "pothole", "person", "motorcycle", "bicycle"}
+        # Matches server CLASS_PRIORITY rankings (P1 / P2 classes)
+        priority_classes = {
+            "car", "bus", "truck", "motorcycle", "bicycle",
+            "pothole", "crack", "manhole", "animal", "person"
+        }
         is_priority_class = event.name in priority_classes
         is_high_priority = event.priority in {"P1", "P2"}
 
@@ -275,7 +283,7 @@ class VoiceAlertEngine:
             return is_high_priority or is_priority_class
 
         if v == "critical":
-            return event.priority == "P1" or event.name in {"car", "bus", "truck", "pothole"}
+            return event.priority == "P1" or event.name in {"car", "bus", "truck", "motorcycle"}
 
         return False
 
@@ -295,13 +303,19 @@ class VoiceAlertEngine:
         dir_str = str(event.approach_direction or ("approaching" if event.approaching else "stationary"))
         key = f"{track_str}|{event.name.lower()}|{pos_str}|{dir_str}"
 
-        repeat_classes = {"person", "door", "stairs", "pole", "obstacle", "car", "bus", "truck", "pothole", "motorcycle", "bicycle"}
-        if event.approaching or event.priority == "P1":
+        # Delay requirements:
+        # - person, door, stairs: exactly 4.0s delay for repeated detections
+        # - approaching vehicles/entities: 2.0s
+        # - other static items/obstacles: 7.0-8.0s so it does not keep repeating
+        norm_name = event.name.lower()
+        if norm_name in {"person", "door", "stairs"}:
+            effective_cooldown = 4.0
+        elif event.approaching or event.priority == "P1":
             effective_cooldown = 2.0
-        elif event.name.lower() in repeat_classes:
-            effective_cooldown = min(3.0, self.cooldown)
+        elif norm_name in {"car", "truck", "bus", "motorcycle", "bicycle", "animal"}:
+            effective_cooldown = 3.0
         else:
-            effective_cooldown = self.cooldown
+            effective_cooldown = max(7.0, self.cooldown)
 
         with self._lock:
             last_time = self._spoken_keys.get(key, 0.0)
@@ -316,11 +330,17 @@ class VoiceAlertEngine:
             self._last_spoken_message = message
             self._last_spoken_time = now
 
+            # Clean backlog so queue never exceeds 1 item waiting (prevents speech overlap / delays)
+            while self._queue.qsize() > 1:
+                try:
+                    self._queue.get_nowait()
+                except Exception:
+                    break
+
         try:
             self._queue.put_nowait((message, False))
             return True
         except queue.Full:
-            # Drop older item if queue backed up, enqueue new item
             try:
                 self._queue.get_nowait()
                 self._queue.put_nowait((message, False))
