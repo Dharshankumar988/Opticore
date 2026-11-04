@@ -55,8 +55,11 @@ class ConfigManager:
 
     def _discover_config_path(self) -> Path:
         """Prefers local config file if exists; otherwise defaults to user home."""
-        if LOCAL_CONFIG_PATH.is_file():
-            return LOCAL_CONFIG_PATH
+        try:
+            if LOCAL_CONFIG_PATH.is_file():
+                return LOCAL_CONFIG_PATH
+        except Exception:
+            pass
         return DEFAULT_GLOBAL_CONFIG_PATH
 
     def load(self) -> OptiCoreConfig:
@@ -64,15 +67,15 @@ class ConfigManager:
         data = OptiCoreConfig.defaults().to_dict()
 
         # 1. Read from file if present
-        if self.config_path.is_file():
-            try:
+        try:
+            if self.config_path and self.config_path.is_file():
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     file_data = json.load(f)
                     if isinstance(file_data, dict):
                         data.update(file_data)
-            except Exception:
-                # If config file is corrupted or unreadable, fall back to defaults
-                pass
+        except Exception:
+            # If config file is corrupted, unreadable, or permission denied, fall back to defaults
+            pass
 
         # 2. Apply Environment Variables
         if "OPTICORE_SERVER_URL" in os.environ:
@@ -136,10 +139,21 @@ class ConfigManager:
     def save(self, path: Optional[Path] = None) -> Path:
         """Saves current config to disk."""
         target = path or self.config_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(self.config.to_dict(), f, indent=2)
-        return target
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
+                json.dump(self.config.to_dict(), f, indent=2)
+            return target
+        except (PermissionError, OSError):
+            # Fall back to current working directory if global config path is not writable
+            fallback = Path("opticore.config.json")
+            try:
+                with open(fallback, "w", encoding="utf-8") as f:
+                    json.dump(self.config.to_dict(), f, indent=2)
+                self.config_path = fallback
+                return fallback
+            except Exception:
+                return target
 
     def set(self, key: str, value: Any) -> bool:
         """Sets a configuration key with type coercion."""

@@ -131,3 +131,14 @@ def test_arg_parser_subcommands():
     assert args.command == "voice"
     assert args.action == "off"
 
+    # Config set via CLI parser
+    args = parser.parse_args(["config", "set", "camera_source", "0"])
+    assert args.command == "config"
+    assert args.action == "set"
+    assert args.key == "camera_source"
+    assert args.value == "0"
+
+    args = parser.parse_args(["config", "show"])
+    assert args.command == "config"
+    assert args.action == "show"
+

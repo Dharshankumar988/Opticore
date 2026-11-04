@@ -455,7 +455,8 @@ async def stream_camera(
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"[ERROR] Could not open camera source: {source}")
-        print("Tip: If using a USB webcam, check index (0, 1). On Raspberry Pi, verify camera permissions.")
+        print("Tip: If using a USB webcam, check index (0, 1).")
+        print("Tip: On Raspberry Pi Bookworm with a CSI ribbon camera, run with: libcamerify python stream_camera.py")
         return 1
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -660,6 +661,19 @@ def main(argv: Optional[list] = None) -> None:
         help="Display local preview window with server-annotated detections.",
     )
     parser.add_argument(
+        "--voice",
+        dest="voice",
+        action="store_true",
+        default=config.voice_enabled,
+        help="Enable local voice alerts for detected objects (default: from saved config).",
+    )
+    parser.add_argument(
+        "--no-voice",
+        dest="voice",
+        action="store_false",
+        help="Disable voice alerts explicitly.",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="Detect and list all available video input devices.",
@@ -683,14 +697,34 @@ def main(argv: Optional[list] = None) -> None:
         print("Specify with --server https://xxxx.ngrok-free.app or configure via 'opticore-cli connect <url>'")
         sys.exit(1)
 
-    code = run_camera_stream_sync(
-        server_url=args.server,
-        camera_source=args.camera,
-        width=args.width,
-        target_fps=args.fps,
-        quality=args.quality,
-        show_window=args.show,
-    )
+    voice_engine = None
+    if getattr(args, "voice", False):
+        try:
+            from opticore_cli.voice import VoiceAlertEngine
+            voice_engine = VoiceAlertEngine(
+                enabled=True,
+                verbosity=config.voice_verbosity,
+                rate=config.voice_rate,
+                volume=config.voice_volume,
+                cooldown=config.voice_cooldown,
+            )
+            print("[*] Voice alert engine initialized (alerts active).")
+        except Exception as e:
+            print(f"[!] Warning: Could not initialize voice engine: {e}")
+
+    try:
+        code = run_camera_stream_sync(
+            server_url=args.server,
+            camera_source=args.camera,
+            width=args.width,
+            target_fps=args.fps,
+            quality=args.quality,
+            show_window=args.show,
+            voice_engine=voice_engine,
+        )
+    finally:
+        if voice_engine:
+            voice_engine.shutdown()
     sys.exit(code or 0)
 
 

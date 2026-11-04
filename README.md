@@ -155,12 +155,14 @@ This section covers everything needed to run OptiCore on a Raspberry Pi (3B+, 4,
 # Update and install all required system packages in one command
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y \
-  git python3-pip python3-venv \
+  git python3-pip python3-venv python3-opencv \
   espeak-ng libespeak-ng1 \
-  libgl1 libglib2.0-0 \
-  v4l-utils \
-  alsa-utils pulseaudio
+  v4l-utils alsa-utils \
+  libcamerify libcamera-tools
 ```
+
+> [!TIP]
+> Installing `python3-opencv` via `apt` provides hardware-accelerated ARM wheels and prevents high memory usage on Pi Zero 2 W / Pi 3B+.
 
 ### 2. Camera Setup
 
@@ -175,23 +177,19 @@ v4l2-ctl --device=/dev/video0 --stream-mmap --stream-count=5
 ```
 
 #### Pi Camera Module (CSI Ribbon Cable)
+On Raspberry Pi OS Bookworm (Debian 12), the camera interface is **enabled automatically** via device tree detection. Legacy `raspi-config` camera toggles are no longer needed.
+
 ```bash
-# Enable the camera interface
-sudo raspi-config
-# Navigate to: Interface Options → Camera → Enable → Reboot
+# Verify Pi Camera is detected (Bookworm uses rpicam-apps)
+rpicam-hello --list-cameras
 
-# Verify Pi Camera is detected
-libcamera-hello --list-cameras
-
-# Install libcamera Python bindings (if using Pi Camera with OpenCV)
-sudo apt install -y python3-libcamera python3-picamera2
-
-# Quick test (shows preview for 3 seconds)
-libcamera-hello -t 3000
+# Quick test (shows camera preview for 3 seconds)
+rpicam-hello -t 3000
 ```
 
 > [!NOTE]
-> If using a Pi Camera Module, set `camera_source` to `0` in OptiCore config. OpenCV's `cv2.VideoCapture(0)` works with both USB and Pi Camera on Bookworm.
+> **OpenCV on Bookworm with CSI Camera:**  
+> Bookworm uses the `libcamera` architecture instead of legacy V4L2. When running OpenCV with a CSI Ribbon Camera Module, prefix Python commands with `libcamerify` (e.g. `libcamerify python stream_camera.py`) to provide V4L2 device emulation for OpenCV. Standard USB webcams do not need `libcamerify`.
 
 ### 3. Audio Output Setup
 
@@ -216,30 +214,32 @@ bluetoothctl
 # Test espeak-ng voice output
 espeak-ng "OptiCore is ready"
 
-# Adjust system volume (0-100%)
-amixer set Master 85%
+# Adjust system volume (0-100% on Raspberry Pi PCM / Headphone control)
+amixer set PCM 85% 2>/dev/null || amixer set Headphone 85% 2>/dev/null || amixer set Master 85% 2>/dev/null
 ```
 
 ### 4. Install and Run OptiCore CLI
 
 ```bash
-# Clone, create venv, and install
+# Clone, create venv with system-site-packages (reuses apt-optimized OpenCV), and install
 git clone https://github.com/Dharshankumar988/Opticore.git
 cd Opticore
-python3 -m venv venv
+python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 
-# Connect to your running server
+# Connect to your running server (saves URL to ~/.opticore/config.json)
 opticore-cli connect https://your-ngrok-url.ngrok-free.app
 
-# Start camera streaming + voice alerts
-opticore-cli camera on
+# Enable voice alerts
 opticore-cli voice on
 
-# Or launch the full interactive menu
+# Start live camera stream in foreground
+opticore-cli stream
+
+# Or launch the full interactive arrow-key menu
 opticore-cli
 ```
 
@@ -252,7 +252,13 @@ python stream_camera.py \
   --camera 0 \
   --fps 15
 
-# Stream with lower resolution for Pi Zero 2 W (saves bandwidth)
+# Stream CSI Ribbon Pi Camera (using libcamerify for Bookworm libcamera support)
+libcamerify python stream_camera.py \
+  --server https://your-ngrok-url.ngrok-free.app \
+  --camera 0 \
+  --fps 15
+
+# Stream with lower resolution for Pi Zero 2 W (saves bandwidth & CPU)
 python stream_camera.py \
   --server https://your-ngrok-url.ngrok-free.app \
   --camera 0 \
@@ -264,7 +270,7 @@ python stream_camera.py \
 
 You can set up OptiCore once so that whenever the Raspberry Pi powers on, it automatically initializes the camera, connects to the server, and begins streaming frames and voice alerts immediately. 
 
-Because OptiCore uses persistent configuration (`~/.opticore/config.json`), you configure the server URL and camera once via the CLI, and the systemd service reads those settings automatically on boot.
+Because OptiCore uses persistent configuration (`~/.opticore/config.json`), you configure the server URL, camera, and voice once via the CLI, and the systemd service reads those settings automatically on boot.
 
 #### Step 1: Configure Your URL and Camera Once
 ```bash
@@ -275,11 +281,19 @@ opticore-cli config set voice_enabled true
 ```
 
 #### Step 2: Create the systemd Service File
+
+Check your username and path:
+```bash
+echo $USER
+pwd
+```
+
+Create the service file:
 ```bash
 sudo nano /etc/systemd/system/opticore.service
 ```
 
-Paste the following service definition:
+Paste the following service definition (replace `<USER>` with your actual Raspberry Pi username, e.g. `pi`):
 
 ```ini
 [Unit]
@@ -289,10 +303,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/Opticore
+User=<USER>
+WorkingDirectory=/home/<USER>/Opticore
 # Automatically reads persistent settings from ~/.opticore/config.json
-ExecStart=/home/pi/Opticore/venv/bin/python stream_camera.py
+# Note: For CSI Ribbon Pi Camera on Bookworm, use: ExecStart=/usr/bin/libcamerify /home/<USER>/Opticore/venv/bin/python stream_camera.py
+ExecStart=/home/<USER>/Opticore/venv/bin/python stream_camera.py
 Restart=always
 RestartSec=5
 

@@ -590,7 +590,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # config
     p_cfg = subparsers.add_parser("config", parents=[common_parent], help="View or modify configuration")
-    p_cfg.add_argument("action", nargs="?", default="show", choices=["show", "reset"], help="Config action")
+    p_cfg.add_argument("action", nargs="?", default="show", choices=["show", "set", "reset"], help="Config action (show, set, reset)")
+    p_cfg.add_argument("key", nargs="?", default=None, help="Configuration key to set (e.g. camera_source, voice_enabled)")
+    p_cfg.add_argument("value", nargs="?", default=None, help="Configuration value to set")
 
     # mock-server
     p_mock = subparsers.add_parser("mock-server", parents=[common_parent], help="Run local OptiCore mock server")
@@ -648,7 +650,11 @@ def main(argv: Optional[List[str]] = None) -> None:
         cli.shutdown()
     elif args.command == "camera":
         cam_act = "on" if (getattr(args, "on", False) or args.action == "on") else ("off" if (getattr(args, "off", False) or args.action == "off") else (args.action or "status"))
-        cli.handle_camera([cam_act])
+        if cam_act in {"on", "start"}:
+            console.print("[bold cyan]Starting live camera stream... (Press Ctrl+C to stop)[/bold cyan]")
+            cli.handle_camera(["stream"])
+        else:
+            cli.handle_camera([cam_act])
         cli.shutdown()
     elif args.command == "stream":
         stream_args = []
@@ -665,7 +671,12 @@ def main(argv: Optional[List[str]] = None) -> None:
         cli.handle_voice([voice_act])
         cli.shutdown()
     elif args.command == "config":
-        cli.handle_config([args.action])
+        cfg_args = [args.action]
+        if getattr(args, "key", None):
+            cfg_args.append(args.key)
+        if getattr(args, "value", None):
+            cfg_args.append(args.value)
+        cli.handle_config(cfg_args)
         cli.shutdown()
     elif args.command == "mock-server":
         from opticore_cli.mock_server import run_mock_server

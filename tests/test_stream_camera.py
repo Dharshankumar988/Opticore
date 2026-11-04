@@ -27,3 +27,21 @@ def test_detect_cameras():
         assert "index" in c
         assert "resolution" in c
         assert "label" in c
+
+
+def test_stream_camera_voice_flags():
+    import argparse
+    from opticore_cli.config import ConfigManager
+
+    config = ConfigManager().load()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--voice", dest="voice", action="store_true", default=config.voice_enabled)
+    parser.add_argument("--no-voice", dest="voice", action="store_false")
+
+    # Flag --voice
+    args = parser.parse_args(["--voice"])
+    assert args.voice is True
+
+    # Flag --no-voice
+    args = parser.parse_args(["--no-voice"])
+    assert args.voice is False
