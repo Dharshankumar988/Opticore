@@ -201,6 +201,74 @@ def detect_cameras(max_probe: int = 4) -> List[Dict[str, str]]:
     return found_cameras
 
 
+def open_camera_capture(camera_source: Union[int, str], width: int = 640):
+    """Opens a video capture instance with automatic Picamera2 support on Raspberry Pi."""
+    # 1. Automatic Picamera2 support for CSI camera modules on Raspberry Pi
+    if str(camera_source).strip().lower() in {"0", "picam", "csi", "pi"}:
+        try:
+            from picamera2 import Picamera2
+
+            class PiCamera2Wrapper:
+                def __init__(self, w: int):
+                    self.picam2 = Picamera2()
+                    h = int(w * 0.75)
+                    cfg = self.picam2.create_video_configuration(main={"size": (w, h), "format": "BGR888"})
+                    self.picam2.configure(cfg)
+                    self.picam2.start()
+
+                def isOpened(self) -> bool:
+                    return self.picam2 is not None
+
+                def read(self):
+                    try:
+                        arr = self.picam2.capture_array()
+                        return True, arr
+                    except Exception:
+                        return False, None
+
+                def release(self):
+                    try:
+                        self.picam2.stop()
+                        self.picam2.close()
+                    except Exception:
+                        pass
+
+            wrapper = PiCamera2Wrapper(width)
+            for _ in range(8):
+                ok, tframe = wrapper.read()
+                if ok and tframe is not None:
+                    return wrapper, "picamera2"
+                time.sleep(0.1)
+        except Exception:
+            pass
+
+    # 2. Standard OpenCV VideoCapture
+    if cv2 is None:
+        return None, "none"
+
+    try:
+        source: Union[int, str] = int(camera_source)
+    except ValueError:
+        source = str(camera_source)
+
+    cap = cv2.VideoCapture(source)
+    if not cap.isOpened() and isinstance(source, int) and hasattr(cv2, "CAP_V4L2"):
+        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(width * 0.75))
+        # Warmup sensor buffers (crucial for ov5647 / libcamerify on Raspberry Pi)
+        for _ in range(15):
+            ret, _ = cap.read()
+            if ret:
+                break
+            time.sleep(0.1)
+        return cap, "opencv"
+
+    return cap, "failed"
+
+
 class CameraStreamManager:
     """Manages background camera streaming lifecycle with simple ON/OFF toggling."""
 
@@ -305,19 +373,12 @@ class CameraStreamManager:
             return
 
         ws_url = convert_to_ws_url(server_url)
-        try:
-            source = int(camera_source)
-        except ValueError:
-            source = str(camera_source)
-
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            self._last_error = f"Could not open camera device '{source}'."
+        cap, _ = open_camera_capture(camera_source, width)
+        if cap is None or not cap.isOpened():
+            self._last_error = f"Could not open camera device '{camera_source}'."
             self._started_event.set()
             return
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(width * 0.75))
         frame_interval = 1.0 / max(1.0, target_fps)
 
         try:
@@ -329,12 +390,19 @@ class CameraStreamManager:
             ) as ws:
                 self._started_event.set()
                 start_time = time.time()
+                consecutive_fails = 0
+                max_consecutive_fails = 15
 
                 while cap.isOpened() and not self._stop_event.is_set():
                     loop_start = time.perf_counter()
                     ret, frame = cap.read()
-                    if not ret:
+                    if not ret or frame is None:
+                        consecutive_fails += 1
+                        if consecutive_fails < max_consecutive_fails:
+                            await asyncio.sleep(0.1)
+                            continue
                         break
+                    consecutive_fails = 0
 
                     h, w = frame.shape[:2]
                     if w > width:
@@ -446,21 +514,16 @@ async def stream_camera(
 
     ws_url = convert_to_ws_url(server_url)
 
-    try:
-        source: Union[int, str] = int(camera_source)
-    except ValueError:
-        source = str(camera_source)
-
-    print(f"[*] Opening camera source: {source}...")
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        print(f"[ERROR] Could not open camera source: {source}")
+    print(f"[*] Opening camera source: {camera_source}...")
+    cap, backend = open_camera_capture(camera_source, width)
+    if cap is None or not cap.isOpened():
+        print(f"[ERROR] Could not open camera source: {camera_source}")
         print("Tip: If using a USB webcam, check index (0, 1).")
         print("Tip: On Raspberry Pi Bookworm with a CSI ribbon camera, run with: libcamerify python stream_camera.py")
         return 1
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(width * 0.75))
+    if backend == "picamera2":
+        print("[+] Native Raspberry Pi Camera (Picamera2) initialized successfully!")
 
     frame_interval = 1.0 / max(1.0, target_fps)
     print(f"[*] Connecting to OptiCore Vision WebSocket: {ws_url}")
@@ -478,14 +541,22 @@ async def stream_camera(
             ping_timeout=20,
         ) as ws:
             print("[+] Connected to OptiCore server! Live camera feed is active.")
+            consecutive_fails = 0
+            max_consecutive_fails = 15
 
             while cap.isOpened() and (stop_event is None or not stop_event.is_set()):
                 loop_start = time.perf_counter()
 
                 ret, frame = cap.read()
-                if not ret:
+                if not ret or frame is None:
+                    consecutive_fails += 1
+                    if consecutive_fails < max_consecutive_fails:
+                        await asyncio.sleep(0.1)
+                        continue
                     print("\n[!] Camera feed ended or frame could not be read.")
                     break
+
+                consecutive_fails = 0
 
                 h, w = frame.shape[:2]
                 if w > width:
