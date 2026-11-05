@@ -299,7 +299,12 @@ class InteractiveMenu:
         cam_src = str(getattr(self.cli.config, "camera_source", "0"))
         cam_label = f"Device {cam_src}" if cam_src in ("0", "1") else f"Src: {cam_src[:14]}"
         cam_preview = getattr(self.cli.config, "camera_show_preview", False)
-        preview_badge = "[bold green]ON[/bold green]" if cam_preview else "[dim]OFF[/dim]"
+        is_linux = sys.platform.startswith("linux")
+        has_display = True if not is_linux else bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        if not has_display:
+            preview_badge = "[dim]OFF (Headless / SSH)[/dim]"
+        else:
+            preview_badge = "[bold green]ON[/bold green]" if cam_preview else "[dim]OFF[/dim]"
 
         return [
             {
@@ -610,9 +615,25 @@ class InteractiveMenu:
                     self.pause_for_user()
 
                 elif action == "camera_preview_toggle":
-                    new_preview = not getattr(self.cli.config, "camera_show_preview", False)
-                    self.cli.config.camera_show_preview = new_preview
-                    self.cli.config_manager.save()
+                    is_linux = sys.platform.startswith("linux")
+                    has_display = True if not is_linux else bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+                    if not has_display:
+                        self.cli.config.camera_show_preview = False
+                        self.cli.config_manager.save()
+                        os.system("cls" if os.name == "nt" else "clear")
+                        console.print(Panel(
+                            "[yellow]No graphical display detected (DISPLAY is not set).[/yellow]\n\n"
+                            "[white]When connected remotely via SSH without an X11/Wayland display server, "
+                            "local GUI preview windows are disabled to prevent Qt crashes.\n"
+                            "Frames and detections are streamed headlessly to the server.[/white]",
+                            title="[bold cyan]Headless Mode Active[/bold cyan]",
+                            box=box.ROUNDED,
+                        ))
+                        self.pause_for_user()
+                    else:
+                        new_preview = not getattr(self.cli.config, "camera_show_preview", False)
+                        self.cli.config.camera_show_preview = new_preview
+                        self.cli.config_manager.save()
 
                 elif action == "camera_stream_new":
                     os.system("cls" if os.name == "nt" else "clear")

@@ -163,15 +163,38 @@ def detect_cameras(max_probe: int = 4) -> List[Dict[str, str]]:
     """Probes system for available video capture devices cross-platform.
     Returns list of dicts with keys: 'index', 'resolution', 'label'.
     """
-    if cv2 is None:
-        return []
-
     found_cameras = []
+
+    # 1. Probe for Raspberry Pi Camera Module (CSI Ribbon Cable) via Picamera2
+    try:
+        from picamera2 import Picamera2
+        with SuppressStderr():
+            picam2 = Picamera2()
+            cinfo = getattr(picam2, "camera_info", [])
+            model = cinfo[0].get("Model", "Pi Camera Module") if cinfo else "Pi Camera (CSI)"
+            found_cameras.append({
+                "index": "0",
+                "resolution": "2592x1944" if "5647" in model else "1920x1080",
+                "label": f"Raspberry Pi Camera [{model}] (Picamera2)",
+            })
+            picam2.close()
+    except Exception:
+        pass
+
+    if cv2 is None:
+        return found_cameras
+
+    has_picam_0 = any(c["index"] == "0" for c in found_cameras)
+    start_idx = 1 if has_picam_0 else 0
+
     with SuppressStderr():
-        for idx in range(max_probe):
+        for idx in range(start_idx, max_probe):
             cap = cv2.VideoCapture(idx)
             if cap.isOpened():
                 ret, _ = cap.read()
+                if not ret:
+                    time.sleep(0.05)
+                    ret, _ = cap.read()
                 if ret:
                     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -376,7 +399,8 @@ class CameraStreamManager:
             self._started_event.set()
             return
 
-        has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        is_linux = sys.platform.startswith("linux")
+        has_display = True if not is_linux else bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
         if show_window and not has_display:
             show_window = False
 
@@ -520,7 +544,8 @@ async def stream_camera(
         print("Please install them: pip install opencv-python websockets")
         return 1
 
-    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    is_linux = sys.platform.startswith("linux")
+    has_display = True if not is_linux else bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
     if show_window and not has_display:
         show_window = False
 
