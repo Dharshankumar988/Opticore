@@ -239,7 +239,7 @@ def open_camera_capture(camera_source: Union[int, str], width: int = 640):
                 def __init__(self, w: int):
                     self.picam2 = Picamera2()
                     h = int(w * 0.75)
-                    cfg = self.picam2.create_video_configuration(main={"size": (w, h), "format": "BGR888"})
+                    cfg = self.picam2.create_video_configuration(main={"size": (w, h), "format": "RGB888"})
                     self.picam2.configure(cfg)
                     self.picam2.start()
 
@@ -249,6 +249,9 @@ def open_camera_capture(camera_source: Union[int, str], width: int = 640):
                 def read(self):
                     try:
                         arr = self.picam2.capture_array()
+                        if arr is not None and cv2 is not None:
+                            # Picamera2 native array is RGB888; convert to BGR for OpenCV imencode
+                            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
                         return True, arr
                     except Exception:
                         return False, None
