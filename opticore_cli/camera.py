@@ -782,8 +782,8 @@ def main(argv: Optional[list] = None) -> None:
         "--voice",
         dest="voice",
         action="store_true",
-        default=config.voice_enabled,
-        help="Enable local voice alerts for detected objects (default: from saved config).",
+        default=True,
+        help="Enable local voice alerts for detected objects (default: enabled).",
     )
     parser.add_argument(
         "--no-voice",
@@ -816,7 +816,7 @@ def main(argv: Optional[list] = None) -> None:
         sys.exit(1)
 
     voice_engine = None
-    if getattr(args, "voice", False):
+    if getattr(args, "voice", True):
         try:
             from opticore_cli.voice import VoiceAlertEngine
             voice_engine = VoiceAlertEngine(
@@ -826,7 +826,8 @@ def main(argv: Optional[list] = None) -> None:
                 volume=config.voice_volume,
                 cooldown=config.voice_cooldown,
             )
-            print("[*] Voice alert engine initialized (alerts active).")
+            print(f"[*] Voice alert engine initialized (active, backend: {voice_engine._backend}).")
+            voice_engine.speak_text("OptiCore vision active", force=True)
         except Exception as e:
             print(f"[!] Warning: Could not initialize voice engine: {e}")
 

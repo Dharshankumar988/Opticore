@@ -67,6 +67,24 @@ class VoiceAlertEngine:
             self._engine_available = True
             return
 
+        if system == "linux":
+            # On Linux / Raspberry Pi, prefer native espeak-ng or espeak CLI
+            # This routes directly through PipeWire / PulseAudio into Bluetooth sinks
+            for b in ["espeak-ng", "espeak"]:
+                try:
+                    res = subprocess.run(
+                        ["which", b],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                    )
+                    if res.returncode == 0:
+                        self._backend = b
+                        self._engine_available = True
+                        return
+                except Exception:
+                    pass
+
         try:
             import pyttsx3
 
@@ -79,30 +97,7 @@ class VoiceAlertEngine:
         except Exception as e:
             logger.debug("pyttsx3 unavailable: %s", e)
 
-        if system == "linux":
-            # Check for espeak-ng or espeak on Raspberry Pi / Linux
-            candidate_bin = None
-            for b in ["espeak-ng", "espeak"]:
-                try:
-                    res = subprocess.run(
-                        ["which", b],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        check=False,
-                    )
-                    if res.returncode == 0:
-                        candidate_bin = b
-                        break
-                except Exception:
-                    pass
-
-            if candidate_bin:
-                self._backend = candidate_bin
-                self._engine_available = True
-            else:
-                self._backend = "silent"
-                self._engine_available = False
-        elif system == "darwin":
+        if system == "darwin":
             self._backend = "say"
             self._engine_available = True
         else:
