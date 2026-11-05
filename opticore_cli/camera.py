@@ -249,9 +249,6 @@ def open_camera_capture(camera_source: Union[int, str], width: int = 640):
                 def read(self):
                     try:
                         arr = self.picam2.capture_array()
-                        if arr is not None:
-                            # Picamera2 native array is RGB; reverse channels so Red is Red, Blue is Blue, and skin is natural
-                            arr = arr[:, :, ::-1]
                         return True, arr
                     except Exception:
                         return False, None
@@ -319,7 +316,7 @@ class CameraStreamManager:
     def is_active(self) -> bool:
         return self._is_active and self._thread is not None and self._thread.is_alive()
 
-    def start(self, server_url: str = "") -> Tuple[bool, str]:
+    def start(self, server_url: str = "", swap_rb: bool = False) -> Tuple[bool, str]:
         """Starts streaming the camera in the background."""
         if self.is_active:
             return True, "Camera stream is already active."
@@ -348,6 +345,7 @@ class CameraStreamManager:
                         target_fps=cfg.camera_fps,
                         quality=cfg.camera_quality,
                         show_window=cfg.camera_show_preview,
+                        swap_rb=swap_rb,
                     )
                 )
             except Exception as e:
@@ -396,7 +394,7 @@ class CameraStreamManager:
             "last_error": self._last_error,
         }
 
-    async def _run_stream(self, server_url, camera_source, width, target_fps, quality, show_window):
+    async def _run_stream(self, server_url, camera_source, width, target_fps, quality, show_window, swap_rb: bool = False):
         if cv2 is None or websockets is None:
             self._last_error = "OpenCV or websockets not installed."
             self._started_event.set()
@@ -438,6 +436,9 @@ class CameraStreamManager:
                             continue
                         break
                     consecutive_fails = 0
+
+                    if swap_rb and frame is not None:
+                        frame = frame[:, :, ::-1]
 
                     h, w = frame.shape[:2]
                     if w > width:
@@ -798,6 +799,12 @@ def main(argv: Optional[list] = None) -> None:
         help="Disable voice alerts explicitly.",
     )
     parser.add_argument(
+        "--verbosity",
+        default="all",
+        choices=["all", "priority", "critical"],
+        help="Voice alert verbosity level (default: all).",
+    )
+    parser.add_argument(
         "--swap-rb",
         dest="swap_rb",
         action="store_true",
@@ -834,7 +841,7 @@ def main(argv: Optional[list] = None) -> None:
             from opticore_cli.voice import VoiceAlertEngine
             voice_engine = VoiceAlertEngine(
                 enabled=True,
-                verbosity=config.voice_verbosity,
+                verbosity=getattr(args, "verbosity", "all"),
                 rate=config.voice_rate,
                 volume=config.voice_volume,
                 cooldown=config.voice_cooldown,

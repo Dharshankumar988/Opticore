@@ -68,14 +68,19 @@ class VoiceAlertEngine:
             return
 
         if system == "linux":
+            import shutil
             # On Linux / Raspberry Pi, prefer native espeak-ng or espeak CLI
             # This routes directly through PipeWire / PulseAudio into Bluetooth sinks
             for b in ["espeak-ng", "espeak"]:
+                if shutil.which(b) or os.path.exists(f"/usr/bin/{b}") or os.path.exists(f"/bin/{b}"):
+                    self._backend = b
+                    self._engine_available = True
+                    return
                 try:
                     res = subprocess.run(
-                        ["which", b],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                        [b, "--version"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                         check=False,
                     )
                     if res.returncode == 0:
@@ -229,16 +234,28 @@ class VoiceAlertEngine:
         # Fallback 2: espeak / espeak-ng (Raspberry Pi OS / Linux)
         elif self._backend in {"espeak", "espeak-ng"}:
             try:
+                import sys
+                sys.stdout.write(f"\n[VOICE ALERT] {clean_message}\n")
+                sys.stdout.flush()
+
+                # Ensure XDG_RUNTIME_DIR is set so PipeWire / PulseAudio routes to Bluetooth sink
+                sub_env = dict(os.environ)
+                if "XDG_RUNTIME_DIR" not in sub_env and hasattr(os, "getuid"):
+                    user_run = f"/run/user/{os.getuid()}"
+                    if os.path.exists(user_run):
+                        sub_env["XDG_RUNTIME_DIR"] = user_run
+
                 subprocess.run(
-                    [self._backend, "-s", str(self.rate), clean_message],
+                    [self._backend, "-s", str(self.rate), "-a", "130", clean_message],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    env=sub_env,
                     check=False,
                     timeout=10,
                 )
                 return
             except Exception as e:
-                logger.debug("%s failed: %s", self._backend, e)
+                logger.warning("%s failed: %s", self._backend, e)
 
         # Fallback 3: say (macOS)
         elif self._backend == "say":
