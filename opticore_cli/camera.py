@@ -15,6 +15,10 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+# Prevent Qt from attempting to connect to an X11/Wayland display and aborting on headless systems
+if sys.platform != "win32" and "DISPLAY" not in os.environ and "WAYLAND_DISPLAY" not in os.environ:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 try:
     import cv2
     import numpy as np
@@ -372,6 +376,10 @@ class CameraStreamManager:
             self._started_event.set()
             return
 
+        has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        if show_window and not has_display:
+            show_window = False
+
         ws_url = convert_to_ws_url(server_url)
         cap, _ = open_camera_capture(camera_source, width)
         if cap is None or not cap.isOpened():
@@ -511,6 +519,10 @@ async def stream_camera(
         print("[ERROR] Missing required packages for camera streaming.")
         print("Please install them: pip install opencv-python websockets")
         return 1
+
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if show_window and not has_display:
+        show_window = False
 
     ws_url = convert_to_ws_url(server_url)
 
@@ -727,9 +739,16 @@ def main(argv: Optional[list] = None) -> None:
     )
     parser.add_argument(
         "--show",
+        dest="show",
         action="store_true",
         default=config.camera_show_preview,
         help="Display local preview window with server-annotated detections.",
+    )
+    parser.add_argument(
+        "--no-show",
+        dest="show",
+        action="store_false",
+        help="Disable GUI preview window (required for headless / SSH mode).",
     )
     parser.add_argument(
         "--voice",
