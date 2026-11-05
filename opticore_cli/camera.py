@@ -249,9 +249,9 @@ def open_camera_capture(camera_source: Union[int, str], width: int = 640):
                 def read(self):
                     try:
                         arr = self.picam2.capture_array()
-                        if arr is not None and cv2 is not None:
-                            # Picamera2 native array is RGB888; convert to BGR for OpenCV imencode
-                            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+                        if arr is not None:
+                            # Picamera2 native array is RGB; reverse channels so Red is Red, Blue is Blue, and skin is natural
+                            arr = arr[:, :, ::-1]
                         return True, arr
                     except Exception:
                         return False, None
@@ -540,6 +540,7 @@ async def stream_camera(
     show_window: bool = False,
     stop_event: Optional[threading.Event] = None,
     voice_engine: Optional[object] = None,
+    swap_rb: bool = False,
 ) -> int:
     """Capture frames and stream over WebSocket to OptiCore server (foreground CLI mode)."""
     if cv2 is None or websockets is None:
@@ -597,6 +598,9 @@ async def stream_camera(
                     break
 
                 consecutive_fails = 0
+
+                if swap_rb and frame is not None:
+                    frame = frame[:, :, ::-1]
 
                 h, w = frame.shape[:2]
                 if w > width:
@@ -712,6 +716,7 @@ def run_camera_stream_sync(
     quality: int = 65,
     show_window: bool = False,
     voice_engine: Optional[object] = None,
+    swap_rb: bool = False,
 ) -> int:
     """Synchronous wrapper to run stream_camera inside an asyncio loop."""
     try:
@@ -724,6 +729,7 @@ def run_camera_stream_sync(
                 quality=quality,
                 show_window=show_window,
                 voice_engine=voice_engine,
+                swap_rb=swap_rb,
             )
         )
     except KeyboardInterrupt:
@@ -792,6 +798,13 @@ def main(argv: Optional[list] = None) -> None:
         help="Disable voice alerts explicitly.",
     )
     parser.add_argument(
+        "--swap-rb",
+        dest="swap_rb",
+        action="store_true",
+        default=False,
+        help="Invert red and blue color channels.",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="Detect and list all available video input devices.",
@@ -840,6 +853,7 @@ def main(argv: Optional[list] = None) -> None:
             quality=args.quality,
             show_window=args.show,
             voice_engine=voice_engine,
+            swap_rb=args.swap_rb,
         )
     finally:
         if voice_engine:
